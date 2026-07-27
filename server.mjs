@@ -90,7 +90,8 @@ const officialOperations = new Map([
   ["POST /api/official/readback", "readback"],
   ["POST /api/official/rollback", "rollback"],
   ["POST /api/official/auto-login", "autoLogin"],
-  ["GET /api/official/credentials", "credentials"]
+  ["GET /api/official/credentials", "credentials"],
+  ["POST /api/official/logout", "logout"]
 ]);
 
 function safeDailyFile(pathname) {

@@ -339,7 +339,92 @@ export class CdpOfficialBridge {
     }
   }
 
-  async openLogin() {
+  async openLogin(payload = {}) {
+    const username = String(payload?.username || "").trim();
+    if (username) {
+      let cred;
+      try {
+        const { findCredentials } = require("../electron/credentials.cjs");
+        cred = findCredentials(username);
+      } catch {}
+      if (!cred) {
+        const error = new Error(`未找到用户"${username}"的帐密`);
+        error.code = "INVALID_CREDENTIAL";
+        throw error;
+      }
+
+      const encoded = encodeURIComponent(OFFICIAL_RECORD_URL);
+      const page = await putJson(`${this.cdpEndpoint}/json/new?${encoded}`);
+      if (!page?.webSocketDebuggerUrl) {
+        const error = new Error("新登录页未提供Chrome调试连接");
+        error.code = "OFFICIAL_PAGE_NOT_FOUND";
+        throw error;
+      }
+      const connection = new CdpConnection(page.webSocketDebuggerUrl);
+      await connection.open();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const result = await connection.evaluate(`(() => {
+          const u = ${JSON.stringify(cred.username)};
+          const p = ${JSON.stringify(cred.password)};
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value"
+          ).set;
+          const visible = (element) => element && element.offsetParent !== null;
+          const firstVisible = (selectors) => {
+            for (const selector of selectors) {
+              const element = document.querySelector(selector);
+              if (visible(element)) return element;
+            }
+            return null;
+          };
+          const usernameInput = firstVisible([
+            'input[placeholder*="用户名"]',
+            'input[placeholder*="账号"]',
+            'input[name="username"]',
+            'input[name="account"]',
+            'input[type="text"]:not([readonly])'
+          ]);
+          const passwordInput = firstVisible([
+            'input[placeholder*="密码"]',
+            'input[name="password"]',
+            'input[type="password"]'
+          ]);
+          if (!usernameInput || !passwordInput) {
+            return { ok: false, reason: "inputs-not-found" };
+          }
+          const fill = (element, value) => {
+            element.focus();
+            setter.call(element, value);
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+            element.dispatchEvent(new Event("blur", { bubbles: true }));
+          };
+          fill(usernameInput, u);
+          fill(passwordInput, p);
+          const button = [...document.querySelectorAll("button")]
+            .find((entry) => visible(entry) && /登录/.test(entry.textContent || ""));
+          if (button) button.click();
+          return { ok: true, clicked: Boolean(button) };
+        })()`);
+        if (!result?.ok) {
+          const error = new Error("未找到官方登录输入框，无法自动填写帐密");
+          error.code = "LOGIN_FORM_NOT_FOUND";
+          throw error;
+        }
+        await connection.bringToFront();
+      } finally {
+        connection.close();
+      }
+      return {
+        ok: true,
+        opened: true,
+        credentialsFilled: true,
+        awaitingChallenge: true
+      };
+    }
+
     let active;
     try {
       active = await this._connectBest();
@@ -384,6 +469,15 @@ export class CdpOfficialBridge {
       };
     } catch {
       return { ok: true, users: [] };
+    }
+  }
+
+  async logout() {
+    try {
+      const active = await this._connectBest();
+      return await active.official.logout();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -496,14 +590,15 @@ export class CdpOfficialBridge {
   async invoke(name, payload) {
     const methods = {
       status: () => this.status(),
-      openLogin: () => this.openLogin(),
+      openLogin: () => this.openLogin(payload),
       personnel: () => this.personnel(payload),
       queryDay: () => this.queryDay(payload),
       submitPlan: () => this.submitPlan(payload),
       readback: () => this.readback(payload),
       rollback: () => this.rollback(payload),
       autoLogin: () => this.autoLogin(payload),
-      credentials: () => this.credentials()
+      credentials: () => this.credentials(),
+      logout: () => this.logout()
     };
     if (!methods[name]) {
       const error = new Error("未知官方系统桥接操作");

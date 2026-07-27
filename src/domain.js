@@ -905,7 +905,7 @@ function setTopologyPoint(photo, {
     shared: false,
     include: true,
     confidence: "topology",
-    reason: "根据同一拍摄序列的前后锚点、行驶方向和线路拓扑自动判定。"
+    reason: "根据同一拍摄序列的前后锚点、行驶方向和线路拓扑自动确认。"
   });
 }
 
@@ -1132,7 +1132,9 @@ export function resolvePhotoAssignments(photos) {
         : photo.shared || photo.transit || !photo.pointId
           ? "context"
           : margin >= 18 && (withinPatrol || dominantRoute === routeKey) ? "high" : "context",
-      reason: routeChanged || photo.shared || photo.transit
+      reason: topologyConfirmed
+        ? `根据${ROUTES[routeKey].label}同批次已验证点位、相邻图片与拍摄时序自动确认。`
+        : routeChanged || photo.shared || photo.transit
         ? `根据${ROUTES[routeKey].label}的唯一点位、相邻图片与拍摄时序自动归集（路线优势 ${Math.round(margin)} 分）。`
         : photo.reason
     };

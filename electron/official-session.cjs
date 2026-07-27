@@ -27,6 +27,7 @@ const API = Object.freeze({
   journalUpdate: "/check/checklog/updateCheChecklog",
   journalDelete: "/check/checklog/deleteCheChecklogById/",
   personnelList: "/case/caseTemplate/lawOfficer/listLawOfficer",
+  logout: "/auth/oauth/logout",
   upload: "/system/sys/file/uploadCommon",
   attachmentDelete: "/system/sys/file/delete/"
 });
@@ -691,6 +692,14 @@ function normalizedText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function numericTextEqual(left, right) {
+  const a = normalizedText(left);
+  const b = normalizedText(right);
+  if (a === b) return true;
+  if (!/^\d+$/.test(a) || !/^\d+$/.test(b)) return false;
+  return Number(a) === Number(b);
+}
+
 function equalSets(left, right) {
   const a = normalizeDelimited(left);
   const b = normalizeDelimited(right);
@@ -741,7 +750,9 @@ function scheduleEquivalent(existing, payload) {
 }
 
 function recordEquivalent(existing, payload) {
-  return normalizedText(existing.checkStartTime) === normalizedText(payload.checkStartTime)
+  return (!payload.recordNum
+      || normalizedText(existing.recordNum) === normalizedText(payload.recordNum))
+    && normalizedText(existing.checkStartTime) === normalizedText(payload.checkStartTime)
     && normalizedText(existing.checkEndTime) === normalizedText(payload.checkEndTime)
     && equalSets(comparablePeople(existing), comparablePeople(payload))
     && normalizedText(existing.oid) === normalizedText(payload.oid)
@@ -750,10 +761,10 @@ function recordEquivalent(existing, payload) {
     && normalizedText(existing.roadCondition) === normalizedText(payload.roadCondition)
     && equalSets(existing.roadNum, payload.roadNum)
     && equalSets(existing.roadName, payload.roadName)
-    && normalizedText(existing.startKilometer) === normalizedText(payload.startKilometer)
-    && normalizedText(existing.startMeter) === normalizedText(payload.startMeter)
-    && normalizedText(existing.endKilometer) === normalizedText(payload.endKilometer)
-    && normalizedText(existing.endMeter) === normalizedText(payload.endMeter)
+    && numericTextEqual(existing.startKilometer, payload.startKilometer)
+    && numericTextEqual(existing.startMeter, payload.startMeter)
+    && numericTextEqual(existing.endKilometer, payload.endKilometer)
+    && numericTextEqual(existing.endMeter, payload.endMeter)
     && normalizedText(existing.checkType || existing.checkTypeName)
       === normalizedText(payload.checkType)
     && normalizedText(existing.describes) === normalizedText(payload.describes)
@@ -820,7 +831,7 @@ function scheduleCollision(existing, payload) {
     existing.lawEnforcementOfficialsIds || existing.lawEnforcementOfficials,
     payload.lawEnforcementOfficialsIds || payload.lawEnforcementOfficials
   );
-  return sameVehicle || (sameRoute && sharedPersonnel);
+  return sameRoute && (sameVehicle || sharedPersonnel);
 }
 
 function recordCollision(existing, payload) {
@@ -859,7 +870,7 @@ function journalCollision(existing, payload) {
     existing.lawEnforcementOfficialsIds || existing.lawEnforcementOfficials,
     payload.lawEnforcementOfficialsIds || payload.lawEnforcementOfficials
   );
-  return sameVehicle || (sameRoute && sharedPersonnel);
+  return sameRoute && (sameVehicle || sharedPersonnel);
 }
 
 function canonicalize(value) {
@@ -899,6 +910,23 @@ function detectImageMime(buffer) {
     return "image/png";
   }
   return "";
+}
+
+function mergeOrderedAttachments(existing, uploaded, order) {
+  const combined = [...existing, ...uploaded];
+  const queues = new Map();
+  for (const attachment of combined) {
+    const queue = queues.get(attachment.name) || [];
+    queue.push(attachment);
+    queues.set(attachment.name, queue);
+  }
+  const result = [];
+  for (const name of order || []) {
+    const queue = queues.get(name);
+    if (queue?.length) result.push(queue.shift());
+  }
+  for (const queue of queues.values()) result.push(...queue);
+  return result;
 }
 
 function safeTokenEqual(left, right) {
@@ -1307,9 +1335,147 @@ class OfficialSession {
     return this.window;
   }
 
-  async openLogin() {
+  async openLogin(options = {}) {
+    const username = String(options?.username || "").trim();
+    const password = String(options?.password || "");
+
+    if (username && password && this._isWindowUsable()) {
+      try { this.window.destroy(); } catch {}
+      this.window = null;
+      this.loadPromise = null;
+    }
+
     await this.ensureWindow({ show: true });
-    return this.status({ createWindow: false });
+    if (!username || !password) {
+      return this.status({ createWindow: false });
+    }
+
+    await this._waitForPageReady();
+    let filled = await this._fillLoginForm(username, password);
+    if (!filled) {
+      try {
+        await this.window.loadURL(`${new URL(this.officialUrl).origin}/#/login`);
+        await this._waitForPageReady();
+        filled = await this._fillLoginForm(username, password);
+      } catch {}
+    }
+    if (!filled) {
+      throw new OfficialSessionError(
+        "LOGIN_FORM_NOT_FOUND",
+        "未找到官方登录输入框，无法自动填写帐密"
+      );
+    }
+
+    await this._clickLoginButton();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (this._isWindowUsable()) {
+      this.window.show();
+      this.window.focus();
+    }
+    const status = await this.status({ createWindow: false });
+    return {
+      ...status,
+      credentialsFilled: true,
+      awaitingChallenge: !status.authenticated
+    };
+  }
+
+  async logout() {
+    if (!this._isWindowUsable()) {
+      return {
+        ok: true,
+        windowOpen: false,
+        loaded: false,
+        authenticated: false,
+        serviceReady: false,
+        loginRequired: true
+      };
+    }
+
+    const before = await this.status({ createWindow: false });
+    let remoteLogoutAccepted = false;
+    if (before.authenticated) {
+      try {
+        const response = await this._request({
+          url: API.logout,
+          method: "get",
+          showloading: false
+        });
+        const code = String(response?.code ?? "");
+        const message = String(response?.msg || "");
+        remoteLogoutAccepted = code === "200" || message.includes("token校验失败");
+        if (!remoteLogoutAccepted) {
+          this._log("warn", `[official] logout API returned code=${code || "unknown"}`);
+        }
+      } catch (error) {
+        this._log("warn", "[official] logout API failed; clearing local session", error?.message || error);
+      }
+    }
+
+    const wc = this.window.webContents;
+    try {
+      await wc.executeJavaScript(`(async () => {
+        try {
+          const root = document.querySelector('#app') && document.querySelector('#app').__vue__;
+          const store = root && root.$store;
+          if (store) {
+            try { store.commit('CLEAR_ALL_CACHE'); } catch(e) {}
+            try { await store.dispatch('deleteAllTabs'); } catch(e) {}
+          }
+        } catch(e) {}
+
+        const tokenPattern = /^(TokenKey|TokenKey_expired|authToken|access[_-]?token|refresh[_-]?token)$/i;
+        [window.localStorage, window.sessionStorage].forEach(function(store) {
+          try {
+            const keys = [];
+            for (let index = 0; index < store.length; index += 1) {
+              const key = store.key(index);
+              if (tokenPattern.test(String(key)) || key === '_captcha_solved') keys.push(key);
+            }
+            keys.forEach(function(key) { store.removeItem(key); });
+          } catch(e) {}
+        });
+        try {
+          document.cookie.split(';').forEach(function(entry) {
+            const name = entry.split('=')[0].trim();
+            if (tokenPattern.test(name)) {
+              document.cookie = name + '=; Max-Age=0; path=/';
+            }
+          });
+        } catch(e) {}
+        return true;
+      })()`);
+    } catch (error) {
+      this._log("warn", "[official] page session cleanup failed", error?.message || error);
+    }
+
+    try {
+      const cookies = await wc.session?.cookies?.get({ url: OFFICIAL_ORIGIN });
+      for (const cookie of cookies || []) {
+        if (/^(TokenKey|TokenKey_expired|authToken|access[_-]?token|refresh[_-]?token)$/i.test(cookie.name)) {
+          await wc.session.cookies.remove(OFFICIAL_ORIGIN, cookie.name);
+        }
+      }
+    } catch (error) {
+      this._log("warn", "[official] cookie cleanup failed", error?.message || error);
+    }
+
+    await this.window.loadURL(`${OFFICIAL_ORIGIN}/#/login`);
+    await this._waitForPageReady();
+    const after = await this.status({ createWindow: false });
+    if (after.authenticated) {
+      throw new OfficialSessionError(
+        "LOGOUT_VERIFICATION_FAILED",
+        "官方系统退出后仍检测到有效登录状态"
+      );
+    }
+    return {
+      ...after,
+      ok: true,
+      authenticated: false,
+      loginRequired: true,
+      remoteLogoutAccepted
+    };
   }
 
   // ─── 自动登录 ────────────────────────────────────────────────
@@ -1471,6 +1637,118 @@ class OfficialSession {
     }
   }
 
+  // ─── NCC缺口检测: 直接Data URI模板匹配 ──────────────────
+  // 获取verify-image IMG data URI，nativeImage解码，NCC匹配
+  async _findGapPosition(sliderInfo) {
+    if (!sliderInfo || !this._isWindowUsable()) return null;
+    const wc = this.window.webContents;
+
+    try {
+      // 1. 获取两个verify-image的data URI
+      const imageData = await wc.executeJavaScript(`(() => {
+        try {
+          var imgs = document.querySelectorAll('img.verify-image, img[class*="verify-img"]');
+          if (!imgs || imgs.length < 2) return null;
+          var pieceUri = imgs[0].src, bgUri = imgs[1].src;
+          var pW = imgs[0].naturalWidth, pH = imgs[0].naturalHeight;
+          var bW = imgs[1].naturalWidth, bH = imgs[1].naturalHeight;
+          // Get image panel width
+          var panel = document.querySelector('.verify-img-out, .verify-image-panel, [class*="img-out"]');
+          if (!panel) panel = document.querySelector('.verify-bar-area, [class*="bar-area"]');
+          var panelW = panel ? panel.getBoundingClientRect().width : 0;
+          return { pieceUri, pW, pH, bgUri, bW, bH, panelW };
+        } catch(e) { return null; }
+      })()`);
+      if (!imageData || !imageData.pieceUri) { this._log("warn", "[auto-login] no verify-image data URIs"); return null; }
+
+      const { pieceUri, pW, pH, bgUri, bW, bH } = imageData;
+      let panelW = imageData.panelW || sliderInfo.containerRect.width;
+      this._log("log", `[auto-login] NCC images: piece=${pW}x${pH} bg=${bW}x${bH} panelW=${panelW}`);
+
+      // 2. 解码图片
+      const { nativeImage } = require("electron");
+      const pieceImg = nativeImage.createFromDataURL(pieceUri);
+      const bgImg = nativeImage.createFromDataURL(bgUri);
+      let pieceBitmap, bgBitmap;
+      try { pieceBitmap = pieceImg.toBitmap(); } catch { pieceBitmap = pieceImg.getBitmap(); }
+      try { bgBitmap = bgImg.toBitmap(); } catch { bgBitmap = bgImg.getBitmap(); }
+
+      // 3. 灰度 + Alpha mask
+      const pieceMask = new Uint8Array(pW * pH); let maskCount = 0;
+      const pGray = new Float64Array(pW * pH), bGray = new Float64Array(bW * bH);
+      for (let i = 0; i < pW * pH; i++) { const idx = i * 4; pGray[i] = pieceBitmap[idx]*0.299 + pieceBitmap[idx+1]*0.587 + pieceBitmap[idx+2]*0.114; if (pieceBitmap[idx+3] > 64) { pieceMask[i] = 1; maskCount++; } }
+      for (let i = 0; i < bW * bH; i++) { const idx = i * 4; bGray[i] = bgBitmap[idx]*0.299 + bgBitmap[idx+1]*0.587 + bgBitmap[idx+2]*0.114; }
+      const useMask = maskCount > pW * pH * 0.1;
+      this._log("log", `[auto-login] mask: ${maskCount}/${pW*pH} ${useMask ? 'USING' : 'all-pixel'}`);
+
+      // 4. 模板零均值归一化 (mask aware)
+      let tMean = 0; let count = 0;
+      for (let i = 0; i < pW * pH; i++) { if (useMask && !pieceMask[i]) continue; tMean += pGray[i]; count++; }
+      tMean /= count;
+      const tNorm = new Float64Array(pW * pH); let tVar = 0;
+      for (let i = 0; i < pW * pH; i++) { if (useMask && !pieceMask[i]) continue; const v = pGray[i] - tMean; tNorm[i] = v; tVar += v * v; }
+      if (tVar < 0.5) { this._log("warn", "[auto-login] piece template low variance"); return null; }
+
+      // 5. NCC扫描 (Y=0, mask aware)
+      const searchEnd = bW - pW; let bestNcc = -Infinity, bestGx = -1;
+      for (let gx = 0; gx <= searchEnd; gx++) {
+        let sMean = 0; let sc = 0;
+        for (let ty = 0; ty < pH; ty++) for (let tx = 0; tx < pW; tx++) { const idx = ty*pW+tx; if (useMask && !pieceMask[idx]) continue; sMean += bGray[ty*bW+(gx+tx)]; sc++; }
+        if (sc === 0) continue; sMean /= sc;
+        let num = 0, sVar = 0;
+        for (let ty = 0; ty < pH; ty++) for (let tx = 0; tx < pW; tx++) { const idx = ty*pW+tx; if (useMask && !pieceMask[idx]) continue; const t = tNorm[idx]; const s = bGray[ty*bW+(gx+tx)] - sMean; num += t*s; sVar += s*s; }
+        const ncc = sVar > 0.001 ? num / Math.sqrt(tVar * sVar) : 0;
+        if (ncc > bestNcc) { bestNcc = ncc; bestGx = gx; }
+      }
+      this._log("log", `[auto-login] NCC best=${Math.round(bestNcc*1000)/1000} at gx=${bestGx}`);
+
+      // 6. 转换到CSS像素
+      const cssScale = panelW > 0 ? panelW / bW : sliderInfo.containerRect.width / bW;
+      const gapLeftCss = Math.round(bestGx * cssScale);
+      const pieceLeftCss = 0;
+      const handleLeft = sliderInfo.handleRect.x - sliderInfo.containerRect.x;
+      const correctedOffset = gapLeftCss - pieceLeftCss + handleLeft;
+      this._log("log", `[auto-login] gap: css=${gapLeftCss}px handleOff=${handleLeft} offset=${correctedOffset}px ncc=${Math.round(bestNcc*1000)/1000}`);
+      return { offset: correctedOffset, method: `ncc-${Math.round(bestNcc*1000)/1000}`, confidence: Math.round(bestNcc*100) };
+    } catch(e) { this._log("warn", `[auto-login] NCC error: ${e.message}`); return null; }
+  }
+
+  // ─── 增强滑块拖拽 ────────────────────────────────────
+  async _simulateSliderDragV2(sliderInfo, targetOffset) {
+    if (!sliderInfo || !this._isWindowUsable()) return false;
+    const wc = this.window.webContents;
+
+    const handleCX = Math.round(sliderInfo.handleRect.x + sliderInfo.handleRect.width/2);
+    const startY = Math.round(sliderInfo.handleRect.y + sliderInfo.handleRect.height/2);
+    const handleOff = sliderInfo.handleRect.x - sliderInfo.containerRect.x;
+    let dragDist = targetOffset > 0 ? targetOffset - handleOff : sliderInfo.trackWidth;
+    if (dragDist < 5) dragDist = targetOffset;
+    if (dragDist > sliderInfo.trackWidth + 10) dragDist = sliderInfo.trackWidth;
+    const endX = Math.round(handleCX + dragDist);
+
+    try { wc.debugger.attach("1.3"); } catch(e) {
+      if (e.message && e.message.includes("already attached")) { try { wc.debugger.detach(); } catch{} wc.debugger.attach("1.3"); }
+      else { this._log("warn", `[auto-login] debugger: ${e.message}`); return false; }
+    }
+    try {
+      // mousePressed
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mousePressed", x: handleCX, y: startY, button: "left", clickCount: 1 });
+      await new Promise(r => setTimeout(r, 40 + Math.random()*60));
+      // mouseMoved (no mouseReleased - JS bypass handles verification)
+      const steps = 22 + Math.floor(Math.random()*8);
+      for (let i = 1; i <= steps; i++) {
+        const t = i/steps, eased = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
+        const cx = Math.round(handleCX + dragDist*eased), cy = Math.round(startY + Math.sin(i*0.5)*2);
+        await wc.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy, button: "left", movementX: Math.round(dragDist/steps), movementY: 0 });
+        await new Promise(r => setTimeout(r, t>0.9 ? 8+Math.random()*15 : 3+Math.random()*5));
+      }
+      this._log("log", `[auto-login] CDP trajectory: offset=${targetOffset} dist=${Math.round(dragDist)}px`);
+      return true;
+    } catch(e) { this._log("warn", `[auto-login] CDP error: ${e.message}`); return false; }
+    finally { try { wc.debugger.detach(); } catch{} }
+  }
+
+
   async _simulateSliderDrag(sliderInfo) {
     if (!sliderInfo || !this._isWindowUsable()) return false;
     const wc = this.window.webContents;
@@ -1605,6 +1883,34 @@ class OfficialSession {
     return false;
   }
 
+  async _advanceLoginAfterCaptcha(progress, state) {
+    if (!progress || !state) return null;
+
+    if (progress.captchaSolved && state.captchaSolvedAt === null) {
+      state.captchaSolvedAt = this.now();
+      this._log("log", "[auto-login] CAPTCHA accepted; waiting for the site login callback");
+    }
+    if (
+      state.captchaSolvedAt !== null
+      && !state.submittedAfterCaptcha
+      && this.now() - state.captchaSolvedAt >= 700
+    ) {
+      state.submittedAfterCaptcha = await this._clickLoginButton();
+      this._log(
+        state.submittedAfterCaptcha ? "log" : "warn",
+        state.submittedAfterCaptcha
+          ? "[auto-login] login submitted after CAPTCHA acceptance"
+          : "[auto-login] CAPTCHA accepted but login button was not found"
+      );
+    }
+    if (!progress.token) return null;
+
+    const verified = await this.status({ createWindow: false });
+    if (!verified.authenticated || !verified.serviceReady) return null;
+    this._log("log", "[auto-login] login token verified by official API");
+    return verified;
+  }
+
   async autoLogin(username, password) {
     if (typeof username !== "string" || !username.trim()) {
       throw new OfficialSessionError("INVALID_CREDENTIAL", "用户名不能为空");
@@ -1662,6 +1968,11 @@ class OfficialSession {
       this._log("log", `[auto-login] round ${round + 1}/3`);
 
       // 4a. 填写帐密
+      try {
+        await this.window.webContents.executeJavaScript(
+          `try { localStorage.removeItem('_captcha_solved'); } catch(e) {}`
+        );
+      } catch {}
       const filled = await this._fillLoginForm(username, password);
       if (!filled) {
         this._log("warn", "[auto-login] could not fill login form, retrying...");
@@ -1673,35 +1984,133 @@ class OfficialSession {
       await this._clickLoginButton();
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      // 4c. 检测滑块
+      // 4c. Set up XHR interception to detect captcha success
+      await this.window.webContents.executeJavaScript(`(function() {
+        try {
+          var origOpen = XMLHttpRequest.prototype.open;
+          var origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function(m, url) { this._u = url; return origOpen.apply(this, arguments); };
+          XMLHttpRequest.prototype.send = function(body) {
+            var s = this;
+            if (s._u) {
+              s.addEventListener('load', function() {
+                if (new RegExp('captcha/check','i').test(s._u) && s.status === 200) {
+                  try {
+                    var r = JSON.parse(s.responseText);
+                    if (r.success && r.repData && r.repData.result === true) {
+                      console.log('[auto-login] *** CAPTCHA SOLVED! ***');
+                      localStorage.setItem('_captcha_solved', '1');
+                    }
+                  } catch(e) {}
+                }
+              });
+            }
+            return origSend.apply(this, arguments);
+          };
+        } catch(e) {}
+      })()`);
+
+      // 4d. 检测滑块 + NCC缺口检测 + 精准拖拽
       const slider = await this._detectSlider();
+      let gapInfo = null;
 
       if (slider && slider.found) {
-        this._log("log", `[auto-login] slider detected: ${slider.containerSelector}, dragging...`);
-        const dragged = await this._simulateSliderDrag(slider);
-        if (!dragged) {
-          this._log("warn", "[auto-login] slider drag failed, retrying...");
-          // 刷新重试
-          try { await this.window.loadURL(this.officialUrl); } catch {}
-          await this._waitForPageReady();
-          continue;
+        this._log("log", `[auto-login] slider found: ${slider.containerSelector} trackWidth=${slider.trackWidth}`);
+        gapInfo = await this._findGapPosition(slider);
+      }
+
+      // Multi-attempt drag with tweaks
+      const MAX_SUB = 5;
+      let success = false;
+      let authenticatedStatus = null;
+      const loginProgressState = {
+        captchaSolvedAt: null,
+        submittedAfterCaptcha: false
+      };
+      for (let sub = 0; sub < MAX_SUB && !success && Date.now() < deadline; sub++) {
+        const curSlider = await this._detectSlider();
+        if (curSlider && curSlider.found) {
+          let tryOffset;
+          if (gapInfo && gapInfo.offset) {
+            const tweaks = [0, 3, -3, 5, -5];
+            tryOffset = gapInfo.offset + (tweaks[sub] || 0);
+            this._log("log", `[auto-login] sub-${sub+1}/${MAX_SUB}: offset=${tryOffset}px (base=${gapInfo.offset})`);
+          } else {
+            tryOffset = Math.round(curSlider.trackWidth * (0.7 + sub * 0.04));
+            this._log("log", `[auto-login] sub-${sub+1}/${MAX_SUB}: blind offset=${tryOffset}px`);
+          }
+
+          // CDP trajectory (no mouseReleased)
+          await this._simulateSliderDragV2(curSlider, tryOffset);
+
+          // JS bypass: set correct left position and call end() to verify
+          await this.window.webContents.executeJavaScript(`(function() {
+            try {
+              var slider = document.querySelector('.verify-slider');
+              if (!slider || !slider.__vue__) return;
+              var vm = slider.__vue__;
+              var handleOff = ${curSlider.handleRect.x - curSlider.containerRect.x};
+              var targetOffset = ${tryOffset};
+              var targetLeft = targetOffset - handleOff;
+
+              // Set drag state
+              vm.status = true; vm.left = targetLeft; vm.isEnd = false;
+              vm.startLeft = handleOff + 10;
+              vm.startMoveTime = Date.now() - 2000;
+              vm.endMovetime = Date.now();
+
+              // Call end() to trigger verification
+              var endX = slider.getBoundingClientRect().x + handleOff + targetLeft;
+              var evt = new MouseEvent('mouseup', { bubbles:true, cancelable:true, clientX:endX, clientY:slider.getBoundingClientRect().y+50, button:0 });
+              if (typeof vm.end === 'function') vm.end(evt);
+              console.log('[auto-login] JS bypass: left=' + targetLeft + ' end() called');
+            } catch(e) { console.log('[auto-login] bypass error: ' + e.message); }
+          })()`);
         }
-      } else {
-        this._log("log", "[auto-login] no slider detected, waiting for login...");
+
+        // Poll for login success (10s per sub-attempt)
+        const subDeadline = Date.now() + 10000;
+        while (Date.now() < subDeadline && !success) {
+          const poll = await this.window.webContents.executeJavaScript(`(() => {
+            var hasToken = false;
+            var captchaSolved = false;
+            try {
+              hasToken = [localStorage, sessionStorage].some(function(s) {
+                for (var i=0; i<s.length; i++) { var k=s.key(i); if (/^TokenKey$/i.test(k) && s.getItem(k)) return true; }
+                return false;
+              });
+              captchaSolved = localStorage.getItem('_captcha_solved') === '1';
+              if (!hasToken) {
+                var store = document.querySelector('#app').__vue__.$store;
+                if (store && store.state.authToken) hasToken = true;
+              }
+            } catch(e) {}
+            return {
+              token: hasToken,
+              captchaSolved: captchaSolved,
+              notLogin: !/login/i.test(location.href),
+              slider: !!document.querySelector('.verify-slider')
+            };
+          })()`);
+          authenticatedStatus = await this._advanceLoginAfterCaptcha(
+            poll,
+            loginProgressState
+          );
+          if (authenticatedStatus) {
+            success = true;
+            break;
+          }
+          if (!poll || !poll.slider) { this._log("log", "[auto-login] slider disappeared, waiting for login..."); }
+          await new Promise(r => setTimeout(r, poll && poll.token ? 500 : 800));
+        }
+        if (success) break;
       }
 
-      // 4d. 轮询等登录成功
-      const success = await this._pollLoginSuccess(deadline);
       if (success) {
-        this._log("log", "[auto-login] login succeeded");
-        // 导航回业务页面
-        try { await this.window.loadURL(this.officialUrl); } catch {}
-        await this._waitForPageReady();
-        return this.status({ createWindow: false });
+        return authenticatedStatus || this.status({ createWindow: false });
       }
 
-      this._log("warn", `[auto-login] round ${round + 1} timed out, retrying...`);
-      // 刷新页面重试
+      this._log("warn", `[auto-login] round ${round + 1} exhausted, retrying...`);
       try { await this.window.loadURL(this.officialUrl); } catch {}
       await this._waitForPageReady();
     }
@@ -1836,6 +2245,7 @@ class OfficialSession {
       API.journalList,
       API.journalAdd,
       API.journalUpdate,
+      API.logout,
       API.personnelList
     ]);
     const prefixes = [API.scheduleDelete, API.journalDelete, API.attachmentDelete];
@@ -1969,14 +2379,37 @@ class OfficialSession {
     });
     const schedules = responseRecords(schedulesResponse, "查询当日排班")
       .filter((entry) => String(entry.startTime || "").slice(0, 10) === query.date);
-    const records = responseRecords(recordsResponse, "查询当日现场记录")
+    const recordRows = responseRecords(recordsResponse, "查询当日现场记录")
       .filter((entry) => String(entry.checkStartTime || "").slice(0, 10) === query.date);
-    const journals = responseRecords(journalsResponse, "查询日志")
+    const journalRows = responseRecords(journalsResponse, "查询日志")
       .filter((entry) => {
         const patrolDate = String(entry.startCheckTime || "").slice(0, 10);
         const createDate = String(entry.createTime || "").slice(0, 10);
         return patrolDate === query.date || (!patrolDate && createDate === query.date);
       });
+    const records = [];
+    for (const row of recordRows) {
+      const detail = await this._recordDetail(row.recordId);
+      records.push({ ...row, ...detail });
+    }
+    const journals = [];
+    for (const row of journalRows) {
+      const associationResponse = await this._request({
+        url: API.recordLog,
+        method: "get",
+        params: { checklogId: row.checklogId }
+      });
+      const associations = responseData(associationResponse, "读取日志关联记录");
+      if (!Array.isArray(associations)) {
+        throw new OfficialSessionError("OFFICIAL_API_SHAPE", "日志关联记录格式不正确");
+      }
+      journals.push({
+        ...row,
+        recordIds: associations
+          .map((entry) => String(entry?.recordId || "").trim())
+          .filter(Boolean)
+      });
+    }
     return sanitizeForRenderer({
       ok: true,
       date: query.date,
@@ -2605,7 +3038,11 @@ class OfficialSession {
         const payload = {
           ...item.payload,
           ...(action === "update" ? { recordId: existing.recordId } : {}),
-          listAtt: [...existingAttachments, ...uploaded],
+          listAtt: mergeOrderedAttachments(
+            existingAttachments,
+            uploaded,
+            item.attachmentOrder
+          ),
           listAbn: Array.isArray(item.payload.listAbn) ? item.payload.listAbn : [],
           listCaseDocs: Array.isArray(item.payload.listCaseDocs)
             ? item.payload.listCaseDocs
@@ -3022,6 +3459,7 @@ module.exports = {
   equalSets,
   journalCollision,
   journalEquivalent,
+  mergeOrderedAttachments,
   normalizePersonnelQuery,
   normalizeQueryDay,
   normalizeReadback,

@@ -2,10 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  API,
   OFFICIAL_PARTITION,
   OfficialSession,
   equalSets,
   journalCollision,
+  mergeOrderedAttachments,
   normalizeSubmitPlan,
   journalEquivalent,
   recordEquivalent,
@@ -178,6 +180,15 @@ test("normalizes comma and semicolon personnel sets without losing concurrency",
   assert.equal(scheduleCollision(first, concurrent), false);
   assert.equal(
     scheduleCollision(first, {
+      ...first,
+      patrolRoute: "G6",
+      lawEnforcementOfficials: "张彩琪;李彩燕",
+      lawEnforcementOfficialsIds: "person-zhang;person-li"
+    }),
+    false
+  );
+  assert.equal(
+    scheduleCollision(first, {
       ...concurrent,
       patrolRoute: first.patrolRoute
     }),
@@ -195,6 +206,13 @@ test("allows parallel journals on different routes and vehicles", () => {
     patrolRoute: "G6"
   };
   assert.equal(journalCollision(first, parallel), false);
+  assert.equal(
+    journalCollision(first, {
+      ...parallel,
+      plateNumbers: first.plateNumbers
+    }),
+    false
+  );
   assert.equal(
     journalCollision(first, {
       ...parallel,
@@ -217,6 +235,13 @@ test("matches records across delimiter differences but not different route descr
     recordEquivalent({ ...existing, describes: "另一条线路" }, payload),
     false
   );
+  assert.equal(
+    recordEquivalent(
+      { ...existing, endMeter: 0 },
+      { ...payload, endMeter: "000" }
+    ),
+    true
+  );
 });
 
 test("matches record detail personnel from listPer when personIds is blank", () => {
@@ -232,6 +257,24 @@ test("matches record detail personnel from listPer when personIds is blank", () 
     }))
   };
   assert.equal(recordEquivalent(detail, payload), true);
+});
+
+test("interleaves retained and uploaded attachments in patrol order", () => {
+  const existing = [
+    { storageId: "entry", name: "高速入口.jpg" },
+    { storageId: "tunnel", name: "大酉山隧道.jpg" },
+    { storageId: "toll", name: "西宁西收费站.jpg" }
+  ];
+  const uploaded = [{ storageId: "direction", name: "西宁西方向.jpg" }];
+  assert.deepEqual(
+    mergeOrderedAttachments(existing, uploaded, [
+      "高速入口.jpg",
+      "西宁西方向.jpg",
+      "大酉山隧道.jpg",
+      "西宁西收费站.jpg"
+    ]).map((entry) => entry.storageId),
+    ["entry", "direction", "tunnel", "toll"]
+  );
 });
 
 test("journal equivalence verifies narrative, weather and condition fields", () => {
@@ -285,6 +328,172 @@ test("creates the official window with the persistent isolated partition", async
   assert.equal(options.webPreferences.contextIsolation, true);
   assert.equal(options.webPreferences.nodeIntegration, false);
   assert.equal(options.show, false);
+});
+
+test("openLogin fills selected credentials and stops for the manual challenge", async () => {
+  class UnusedWindow {}
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  const fakeWindow = {
+    showCalls: 0,
+    focusCalls: 0,
+    show() { this.showCalls += 1; },
+    focus() { this.focusCalls += 1; },
+    isDestroyed() { return false; },
+    webContents: {
+      getURL: () => "http://110.167.233.70:8084/#/login"
+    }
+  };
+  official.ensureWindow = async () => {
+    official.window = fakeWindow;
+    return fakeWindow;
+  };
+  official._waitForPageReady = async () => {};
+  official._fillLoginForm = async (username, password) => {
+    assert.equal(username, "李彩燕");
+    assert.equal(password, "secret");
+    return true;
+  };
+  let clicks = 0;
+  official._clickLoginButton = async () => {
+    clicks += 1;
+    return true;
+  };
+  official.status = async () => ({
+    ok: true,
+    authenticated: false,
+    serviceReady: false,
+    loginRequired: true
+  });
+
+  const result = await official.openLogin({
+    username: "李彩燕",
+    password: "secret"
+  });
+  assert.equal(clicks, 1);
+  assert.equal(fakeWindow.showCalls, 1);
+  assert.equal(fakeWindow.focusCalls, 1);
+  assert.equal(result.credentialsFilled, true);
+  assert.equal(result.awaitingChallenge, true);
+  assert.equal("password" in result, false);
+});
+
+test("submits login after CAPTCHA and returns only API-verified authentication", async () => {
+  class UnusedWindow {}
+  let now = 1000;
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    now: () => now,
+    logger: { log() {}, error() {} }
+  });
+  let clicks = 0;
+  official._clickLoginButton = async () => {
+    clicks += 1;
+    return true;
+  };
+  official.status = async () => ({
+    ok: true,
+    authenticated: true,
+    serviceReady: true,
+    loginRequired: false
+  });
+  const state = {
+    captchaSolvedAt: null,
+    submittedAfterCaptcha: false
+  };
+
+  assert.equal(
+    await official._advanceLoginAfterCaptcha(
+      { captchaSolved: true, token: false },
+      state
+    ),
+    null
+  );
+  assert.equal(clicks, 0);
+
+  now = 1800;
+  assert.equal(
+    await official._advanceLoginAfterCaptcha(
+      { captchaSolved: true, token: false },
+      state
+    ),
+    null
+  );
+  assert.equal(clicks, 1);
+
+  const result = await official._advanceLoginAfterCaptcha(
+    { captchaSolved: true, token: true },
+    state
+  );
+  assert.equal(clicks, 1);
+  assert.equal(result.authenticated, true);
+  assert.equal(result.serviceReady, true);
+});
+
+test("logout revokes the official session, clears token cookies and verifies signed-out state", async () => {
+  class UnusedWindow {}
+  const removedCookies = [];
+  let navigatedTo = "";
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, warn() {}, error() {} }
+  });
+  official.window = {
+    isDestroyed: () => false,
+    loadURL: async (url) => {
+      navigatedTo = url;
+    },
+    webContents: {
+      getURL: () => "http://110.167.233.70:8084/#/dutyRecord",
+      executeJavaScript: async () => true,
+      session: {
+        cookies: {
+          get: async () => [
+            { name: "TokenKey" },
+            { name: "TokenKey_expired" },
+            { name: "unrelated" }
+          ],
+          remove: async (_url, name) => {
+            removedCookies.push(name);
+          }
+        }
+      }
+    }
+  };
+  let statusCalls = 0;
+  official.status = async () => {
+    statusCalls += 1;
+    return statusCalls === 1
+      ? {
+        ok: true,
+        authenticated: true,
+        serviceReady: true,
+        loginRequired: false
+      }
+      : {
+        ok: true,
+        windowOpen: true,
+        loaded: true,
+        authenticated: false,
+        serviceReady: true,
+        loginRequired: true
+      };
+  };
+  official._request = async (config) => {
+    assert.equal(config.url, API.logout);
+    assert.equal(config.method, "get");
+    return { code: 200 };
+  };
+  official._waitForPageReady = async () => {};
+
+  const result = await official.logout();
+  assert.equal(result.authenticated, false);
+  assert.equal(result.loginRequired, true);
+  assert.equal(result.remoteLogoutAccepted, true);
+  assert.equal(navigatedTo, "http://110.167.233.70:8084/#/login");
+  assert.deepEqual(removedCookies, ["TokenKey", "TokenKey_expired"]);
 });
 
 test("dry-run performs preflight without invoking any write request", async () => {
@@ -342,6 +551,9 @@ test("finds a backfilled journal by patrol date rather than creation date", asyn
     if (url.includes("cheRecordPageList")) {
       return { code: 200, data: { records: [] } };
     }
+    if (url.includes("getCheRecordLog")) {
+      return { code: 200, data: [] };
+    }
     return {
       code: 200,
       data: {
@@ -363,6 +575,7 @@ test("finds a backfilled journal by patrol date rather than creation date", asyn
 
   const result = await official._queryDayValidated({ date: "2026-07-26" });
   assert.deepEqual(result.journals.map((entry) => entry.checklogId), ["backfilled-log"]);
+  assert.deepEqual(result.journals[0].recordIds, []);
 });
 
 test("reads the official law-officer list without exposing phone data", async () => {

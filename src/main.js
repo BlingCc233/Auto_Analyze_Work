@@ -23,6 +23,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogIn,
+  LogOut,
   MapPin,
   RefreshCw,
   Route,
@@ -61,6 +62,7 @@ import {
 import "./styles.css";
 
 const OFFICIAL_URL = "http://110.167.233.70:8084/#/dutyRecord";
+const DEFAULT_CREDENTIAL_USER = "李彩燕";
 const ROUTE_KEYS = Object.keys(ROUTES);
 const ROUTE_BADGES = { g6: "G6", west: "G6 西过境", s101: "S101" };
 const PERSONNEL = Object.keys(OFFICIAL_PERSONNEL);
@@ -103,6 +105,7 @@ const state = {
   credentialUsers: [],
   selectedCredentialUser: "",
   autoLoggingIn: false,
+  loggingOut: false,
   autoLoginError: "",
   photos: [],
   loadingFolder: false,
@@ -179,6 +182,7 @@ const ICONS = {
   LoaderCircle,
   LockKeyhole,
   LogIn,
+  LogOut,
   MapPin,
   RefreshCw,
   Route,
@@ -268,7 +272,8 @@ function desktopMethod(name) {
     readback: ["readback", "officialReadback"],
     rollback: ["rollback", "officialRollback"],
     autoLogin: ["autoLogin", "officialAutoLogin"],
-    credentials: ["credentials", "officialCredentials"]
+    credentials: ["credentials", "officialCredentials"],
+    logout: ["logout", "officialLogout"]
   };
   const methodName = aliases[name]?.find((candidate) => typeof bridge[candidate] === "function");
   return methodName ? bridge[methodName].bind(bridge) : null;
@@ -283,7 +288,8 @@ const WEB_OFFICIAL_ENDPOINTS = Object.freeze({
   readback: ["POST", "/api/official/readback"],
   rollback: ["POST", "/api/official/rollback"],
   autoLogin: ["POST", "/api/official/auto-login"],
-  credentials: ["GET", "/api/official/credentials"]
+  credentials: ["GET", "/api/official/credentials"],
+  logout: ["POST", "/api/official/logout"]
 });
 
 function hasLocalWebBridge() {
@@ -373,7 +379,7 @@ function showToast(message) {
   }, 2200);
 }
 
-function markDirty(message = "内容已修改，重新运行将查重后新增或完全一致复用") {
+function markDirty(message = "内容已修改，重新运行将查重并新增、更新或复用当天记录") {
   if (state.submitResult) state.dirtyAfterSubmit = true;
   state.postSubmitVerified = false;
   state.preflight = null;
@@ -898,8 +904,8 @@ async function runAutomation({ previewOnly = false } = {}) {
     setStep("preflight", "done", "无冲突");
     state.workflowPercent = 78;
 
-    setStep("submit", "active", "仅新增或完全一致复用");
-    state.workflowMessage = "正在新增或复用，请勿关闭应用";
+    setStep("submit", "active", "新增、更新或复用当天记录");
+    state.workflowMessage = "正在同步当天排班、现场记录和日志，请勿关闭应用";
     const livePlan = {
       ...plan,
       dryRun: false,
@@ -908,7 +914,7 @@ async function runAutomation({ previewOnly = false } = {}) {
     const submitted = await callDesktop("submitPlan", livePlan);
     state.submitResult = submitted;
     state.rollback = submitted.rollback || null;
-    setStep("submit", "done", "新增 / 复用完成");
+    setStep("submit", "done", "新增 / 更新 / 复用完成");
     state.workflowPercent = 91;
 
     setStep("readback", "active", "核对字段、附件与关联");
@@ -920,7 +926,7 @@ async function runAutomation({ previewOnly = false } = {}) {
     state.workflowPercent = 100;
     state.workflowMessage = "自动填报完成并通过回读校验";
     state.selectedOutput = "readback";
-    addActivity("排班、现场记录和日志已提交并通过回读", "success");
+    addActivity("排班、现场记录和日志已同步并通过回读", "success");
   } catch (error) {
     if (error?.result?.rollback) state.rollback = error.result.rollback;
     if (error?.result?.partialResults) {
@@ -1083,10 +1089,9 @@ async function loadCredentialUsers() {
     if (result?.ok && Array.isArray(result.users)) {
       state.credentialUsers = result.users.map((u) => u.username).filter(Boolean);
       if (state.credentialUsers.length > 0 && !state.selectedCredentialUser) {
-        // 默认选中第一个匹配当前默认人员的用户
-        const defaults = state.routeProfiles.g6.officers;
-        const match = state.credentialUsers.find((u) => defaults.includes(u));
-        state.selectedCredentialUser = match || state.credentialUsers[0];
+        state.selectedCredentialUser = state.credentialUsers.includes(DEFAULT_CREDENTIAL_USER)
+          ? DEFAULT_CREDENTIAL_USER
+          : state.credentialUsers[0];
       }
     }
   } catch {
@@ -1115,6 +1120,29 @@ async function autoLogin() {
     addActivity(state.autoLoginError, "error");
   } finally {
     state.autoLoggingIn = false;
+    render();
+  }
+}
+
+async function logout() {
+  if (state.autoLoggingIn || state.loggingOut || state.running) return;
+  const confirmed = window.confirm("确认退出官方系统登录？退出后需要重新登录才能使用自动填报功能。");
+  if (!confirmed) return;
+  state.loggingOut = true;
+  render();
+  try {
+    const result = await callDesktop("logout");
+    state.desktopStatus = result;
+    state.personnelSynchronized = false;
+    state.autoLoginError = "";
+    addActivity("已退出官方系统登录", "info");
+    showToast("已退出登录");
+    await refreshDesktopStatus();
+  } catch (error) {
+    state.autoLoginError = error?.message || "退出登录失败";
+    addActivity(state.autoLoginError, "error");
+  } finally {
+    state.loggingOut = false;
     render();
   }
 }
@@ -1330,7 +1358,7 @@ function renderResult() {
       </div>`;
     }).join("")}
     ${state.readbackResult ? `<div class="result-banner verified">${icon("shield-check", 18)}<div><strong>回读一致</strong><span>字段、附件及日志关联均已复核。</span></div></div>` : ""}
-    ${state.dirtyAfterSubmit ? `<div class="result-banner changed">${icon("refresh-cw", 18)}<div><strong>内容已修改</strong><span>再次运行将重新查重，仅新增或完全一致复用。</span></div></div>` : ""}
+    ${state.dirtyAfterSubmit ? `<div class="result-banner changed">${icon("refresh-cw", 18)}<div><strong>内容已修改</strong><span>再次运行将重新查重并新增、更新或复用当天记录。</span></div></div>` : ""}
   </div>`;
 }
 
@@ -1412,7 +1440,7 @@ function renderOutput(outputs) {
       <label><span>现场记录线路</span><select id="output-route" class="field-control" aria-label="选择现场记录线路">
         ${ROUTE_KEYS.map((routeKey) => `<option value="${routeKey}" ${state.selectedRoute === routeKey ? "selected" : ""}>${escapeHtml(ROUTES[routeKey].code)}</option>`).join("")}
       </select></label>
-      <span>修改后重新运行会查重，仅新增或完全一致复用。</span>
+      <span>修改后重新运行会查重并新增、更新或复用当天记录。</span>
     </div>` : ""}
     ${isTextOutput
       ? `<textarea id="generated-output" ${state.selectedOutput === "record" ? "" : "readonly"}>${escapeHtml(content)}</textarea>`
@@ -1472,7 +1500,7 @@ function renderPhotoInspector(photo) {
 function renderFlowInspector() {
   return `<div class="flow-inspector">
     <div class="progress-summary">
-      <div><strong>${escapeHtml(state.workflowMessage)}</strong><span>${state.currentFile ? escapeHtml(state.currentFile) : "OCR → 查重 → 新增 → 回读"}</span></div>
+      <div><strong>${escapeHtml(state.workflowMessage)}</strong><span>${state.currentFile ? escapeHtml(state.currentFile) : "OCR → 查重 → 同步 → 回读"}</span></div>
       <b>${state.workflowPercent}%</b>
     </div>
     <div class="progress-track" aria-label="自动流程进度"><span style="width:${Math.max(0, Math.min(100, state.workflowPercent))}%"></span></div>
@@ -1528,16 +1556,24 @@ function render() {
                 `<option value="${escapeHtml(username)}" ${state.selectedCredentialUser === username ? "selected" : ""}>${escapeHtml(username)}</option>`
               ).join("")}
             </select>
+            ${state.desktopStatus?.authenticated ? `
+            <span class="session-state online" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:100px;font-size:13px;font-weight:500;white-space:nowrap">
+              <span class="session-dot"></span>${escapeHtml(statusLabel())}
+            </span>
+            <button id="logout-btn" class="icon-button logout-btn" title="退出官方系统登录" aria-label="退出官方系统登录" ${state.autoLoggingIn || state.loggingOut || state.running ? "disabled" : ""}>
+              ${icon(state.loggingOut ? "loader-circle" : "log-out", 16, state.loggingOut ? "spin" : "")}
+            </button>
+            ` : `
             <button id="auto-login-btn" class="session-state ${statusClass()} auto-login-btn"
                     ${state.autoLoggingIn || state.running ? "disabled" : ""}
                     title="一键自动登录官方系统（自动过滑块）">
               ${state.autoLoggingIn ? icon("loader-circle", 14, "spin") : `<span class="session-dot"></span>`}
-              ${state.autoLoggingIn ? "登录中..." : (state.desktopStatus?.authenticated ? escapeHtml(statusLabel()) : "一键登录")}
+              ${state.autoLoggingIn ? "登录中..." : "一键登录"}
             </button>
-            ${!state.desktopStatus?.authenticated ? `
-            <button id="manual-login-btn" class="icon-button" title="手动打开登录窗口" aria-label="手动登录">
+            <button id="manual-login-btn" class="icon-button" title="打开登录页并填入当前人员帐密" aria-label="打开登录页并填入当前人员帐密">
               ${icon("external-link", 15)}
-            </button>` : ""}
+            </button>
+            `}
           </div>
           ` : `
           <button id="session-status" class="session-state ${statusClass()}" title="${desktop ? "查看或打开官方系统登录窗口" : "本地自动化服务未连接"}">
@@ -1561,7 +1597,7 @@ function render() {
         <div class="primary-action-wrap">
           <button id="run-automation" class="primary-action" ${state.running ? "disabled" : ""}>
             ${state.running ? icon("loader-circle", 21, "spin") : icon("scan-line", 21)}
-            <span><strong>识别并自动填报</strong><small>${desktop ? "OCR → 查重 → 新增 → 回读" : "浏览器可识别预览，自动提交需桌面服务"}</small></span>
+            <span><strong>识别并自动填报</strong><small>${desktop ? "OCR → 查重 → 同步 → 回读" : "浏览器可识别预览，自动提交需桌面服务"}</small></span>
             ${icon("arrow-right", 19)}
           </button>
           ${state.running ? `<button id="stop-automation" class="stop-button">${icon("x", 16)}停止</button>` : ""}
@@ -1786,15 +1822,21 @@ function bind() {
   // 自动登录：一键登录按钮
   $("#auto-login-btn")?.addEventListener("click", autoLogin);
 
-  // 手动登录兜底按钮
+  // 跳转按钮打开独立登录页，按当前选择人员自动填密后等待滑块。
   $("#manual-login-btn")?.addEventListener("click", async () => {
     try {
-      state.desktopStatus = await callDesktop("openLogin");
+      await callDesktop("openLogin", {
+        username: state.selectedCredentialUser
+      });
+      showToast(`已填写 ${state.selectedCredentialUser}，请完成滑块`);
     } catch (error) {
       state.issues = [issueFromError(error), ...state.issues];
     }
     render();
   });
+
+  // 退出登录按钮
+  $("#logout-btn")?.addEventListener("click", logout);
 
   $("#folder-files")?.addEventListener("change", (event) => useFiles(event.target.files));
   $("#image-files")?.addEventListener("change", (event) => useFiles(event.target.files));

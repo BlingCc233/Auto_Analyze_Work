@@ -322,6 +322,14 @@ test("separates the complete July 27 morning and afternoon patrols from one WeCh
     routeReadiness("west", photos).included.map((photo) => photo.proposedName),
     ["高速入口.jpg", "西宁西方向.jpg", "大酉山隧道.jpg", "西宁西收费站.jpg"]
   );
+  const topologyConfirmed = photos.filter((photo) =>
+    photo.confidence === "topology"
+  );
+  assert.equal(topologyConfirmed.length, 3);
+  for (const photo of topologyConfirmed) {
+    assert.match(photo.reason, /自动确认/);
+    assert.doesNotMatch(photo.reason, /需人工确认/);
+  }
   assert.equal(routeReadiness("g6", photos).reviewCount, 0);
   assert.equal(routeReadiness("west", photos).reviewCount, 0);
 });

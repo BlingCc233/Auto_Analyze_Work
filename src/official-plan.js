@@ -1,4 +1,4 @@
-import { ROUTES, toDisplayDate } from "./domain.js";
+import { ROUTES } from "./domain.js";
 
 export const OFFICIAL_PROFILE = Object.freeze({
   oid: "009ee4f252643b7ea9a50e4ed47f0d23",
@@ -186,6 +186,14 @@ function routeKeyForExistingRecord(record) {
   return "";
 }
 
+function routeKeyForExistingRoute(value) {
+  const text = String(value ?? "");
+  if (/西过境/.test(text)) return "west";
+  if (/S101|西宁高速/.test(text)) return "s101";
+  if (/(^|[,;])G6($|[,;])|京藏高速/.test(text)) return "g6";
+  return "";
+}
+
 function uniqueExisting(items, label) {
   if (items.length > 1) {
     throw new Error(`${label}存在${items.length}条候选，无法自动选择更新目标`);
@@ -193,9 +201,271 @@ function uniqueExisting(items, label) {
   return items[0] ?? null;
 }
 
+function toMinuteStamp(value) {
+  const match = String(value ?? "").match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T]([01]\d|2[0-3]):([0-5]\d)/
+  );
+  if (!match) return Number.NaN;
+  return Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5])
+  ) / 60000;
+}
+
+function overlapMinutes(leftStart, leftEnd, rightStart, rightEnd) {
+  const starts = [toMinuteStamp(leftStart), toMinuteStamp(rightStart)];
+  const ends = [toMinuteStamp(leftEnd), toMinuteStamp(rightEnd)];
+  if ([...starts, ...ends].some((value) => !Number.isFinite(value))) return 0;
+  return Math.max(0, Math.min(...ends) - Math.max(...starts));
+}
+
+function canonicalAttachmentName(value) {
+  return String(value ?? "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/\s+/g, "")
+    .replace(/([^\d])\d+$/, "$1")
+    .replace(/海东收费站(?:入口|出口)?/g, "海东主线收费站")
+    .replace(/韵家口主线收费站/g, "海东主线收费站")
+    .replace(/收费口/g, "收费站")
+    .replace(/同仁路口驶入高速|西过境入口/g, "高速入口")
+    .replace(/大酉山隧道[左右幅]$/g, "大酉山隧道");
+}
+
+function existingAttachmentPlan(record, photos, attachmentSources) {
+  if (!record) {
+    return {
+      listAtt: [],
+      uploads: photos.map((photo) => attachmentFor(photo, attachmentSources)),
+      order: photos.map((photo) => photo.proposedName)
+    };
+  }
+
+  const existing = Array.isArray(record.listAtt) ? record.listAtt : [];
+  const consumed = new Set();
+  const retained = [];
+  const uploads = [];
+  const ordered = [];
+  const plannedCanonical = new Set(
+    photos.map((photo) => canonicalAttachmentName(photo.proposedName))
+  );
+
+  photos.forEach((photo, photoIndex) => {
+    const canonical = canonicalAttachmentName(photo.proposedName);
+    const matchIndex = existing.findIndex((entry, index) =>
+      !consumed.has(index)
+      && canonicalAttachmentName(entry.name) === canonical
+    );
+    if (matchIndex === -1) {
+      uploads.push(attachmentFor(photo, attachmentSources));
+      ordered.push({ name: photo.proposedName, rank: photoIndex, index: existing.length + photoIndex });
+      return;
+    }
+    consumed.add(matchIndex);
+    const entry = {
+      ...existing[matchIndex],
+      name: photo.proposedName
+    };
+    retained.push(entry);
+    ordered.push({ name: entry.name, rank: photoIndex, index: matchIndex });
+  });
+
+  existing.forEach((entry, index) => {
+    if (consumed.has(index)) return;
+    if (plannedCanonical.has(canonicalAttachmentName(entry.name))) return;
+    retained.push(entry);
+    const previous = ordered
+      .filter((item) => item.index < index && Number.isInteger(item.rank))
+      .sort((left, right) => right.index - left.index)[0];
+    const next = ordered
+      .filter((item) => item.index > index && Number.isInteger(item.rank))
+      .sort((left, right) => left.index - right.index)[0];
+    const rank = previous && next && next.rank > previous.rank
+      ? (previous.rank + next.rank) / 2
+      : previous
+        ? previous.rank + 0.5
+        : next
+          ? next.rank - 0.5
+          : photos.length + 0.5;
+    ordered.push({ name: entry.name, rank, index });
+  });
+  return {
+    listAtt: retained,
+    uploads,
+    order: ordered
+      .sort((left, right) => left.rank - right.rank || left.index - right.index)
+      .map((item) => item.name)
+  };
+}
+
+function normalizeLine(value) {
+  return String(value ?? "").replace(/\s+/g, "");
+}
+
+function lineTime(value) {
+  const match = String(value ?? "").match(/(\d{1,2})时(\d{1,2})分/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : Number.NaN;
+}
+
+function mergeSupplementalNarrative(existing, generated) {
+  if (!existing || normalizeLine(existing) === normalizeLine(generated)) return generated;
+  const activityPattern = /施工|养护|绿化|治超|超限|超载|宣传|海报|保通|驻守|方舱|检查|核查|整改|处置|应急|事故|违法|通行受限|拥堵|缓行/;
+  const supplemental = String(existing)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) =>
+      line
+      && !/^巡查期间/.test(line)
+      && activityPattern.test(line)
+      && !normalizeLine(generated).includes(normalizeLine(line))
+    );
+  if (!supplemental.length) return generated;
+
+  const lines = String(generated).split(/\r?\n/);
+  for (const line of supplemental) {
+    const at = lineTime(line);
+    const sameTime = Number.isFinite(at)
+      ? lines.findIndex((entry) => lineTime(entry) === at)
+      : -1;
+    if (sameTime >= 0) {
+      if (!activityPattern.test(lines[sameTime])) lines[sameTime] = line;
+      continue;
+    }
+    const conclusion = lines.findIndex((entry) => /^巡查期间/.test(entry));
+    const later = Number.isFinite(at)
+      ? lines.findIndex((entry, index) =>
+        index > 0
+        && Number.isFinite(lineTime(entry))
+        && lineTime(entry) > at
+      )
+      : -1;
+    const insertAt = later >= 0
+      ? later
+      : conclusion >= 0
+        ? conclusion
+        : lines.length;
+    lines.splice(insertAt, 0, line);
+  }
+  return lines.join("\n");
+}
+
+function recordMatchScore(record, draft, routeKey) {
+  if (routeKeyForExistingRecord(record) !== routeKey) return null;
+  const overlap = overlapMinutes(
+    record.checkStartTime,
+    record.checkEndTime,
+    draft.startTime,
+    draft.endTime
+  );
+  if (overlap <= 0) return null;
+
+  const draftStart = toMinuteStamp(draft.startTime);
+  const draftEnd = toMinuteStamp(draft.endTime);
+  const recordStart = toMinuteStamp(record.checkStartTime);
+  const recordEnd = toMinuteStamp(record.checkEndTime);
+  const draftDuration = Math.max(1, draftEnd - draftStart);
+  const coverage = overlap / draftDuration;
+  if (coverage < 0.5) return null;
+
+  const plannedNames = new Set(
+    draft.readiness.included.map((photo) => canonicalAttachmentName(photo.proposedName))
+  );
+  const existingNames = new Set(
+    (record.listAtt || []).map((entry) => canonicalAttachmentName(entry.name))
+  );
+  const attachmentMatches = [...plannedNames].filter((name) => existingNames.has(name)).length;
+  const startDelta = Math.abs(recordStart - draftStart);
+  const endDelta = Math.abs(recordEnd - draftEnd);
+  return coverage * 100
+    + attachmentMatches * 24
+    + Math.max(0, 30 - startDelta)
+    + Math.max(0, 20 - endDelta / 3);
+}
+
+function selectExistingRecord(existingDay, draft, routeKey, claimedIds) {
+  const candidates = (existingDay?.records || [])
+    .filter((record) => !claimedIds.has(record.recordId))
+    .map((record) => ({
+      record,
+      score: recordMatchScore(record, draft, routeKey)
+    }))
+    .filter((candidate) => Number.isFinite(candidate.score))
+    .sort((left, right) => right.score - left.score);
+  if (!candidates.length) return null;
+  if (
+    candidates.length > 1
+    && candidates[0].score - candidates[1].score < 25
+  ) {
+    throw new Error(`${ROUTES[routeKey].label}当天现场记录存在多个接近候选，拒绝自动覆盖`);
+  }
+  return candidates[0].record;
+}
+
+function recordIdsForJournal(journal) {
+  if (Array.isArray(journal.recordIds)) return journal.recordIds.map(String);
+  return normalizeDelimited(journal.recordsIds);
+}
+
+function selectExistingJournal(existingDay, record, claimedIds) {
+  if (!record) return null;
+  const matches = (existingDay?.journals || []).filter((journal) =>
+    !claimedIds.has(journal.checklogId)
+    && recordIdsForJournal(journal).includes(String(record.recordId))
+  );
+  return uniqueExisting(matches, `现场记录${record.recordNum || record.recordId}关联日志`);
+}
+
+function selectExistingSchedule(existingDay, {
+  routeKey,
+  draft,
+  journal,
+  record,
+  claimedIds
+}) {
+  const schedules = (existingDay?.schedules || [])
+    .filter((schedule) => !claimedIds.has(schedule.scheduleId));
+  if (journal?.scheduleId) {
+    const match = schedules.find((schedule) => schedule.scheduleId === journal.scheduleId);
+    if (!match) throw new Error(`未找到日志关联排班${journal.scheduleId}`);
+    const unrelated = (existingDay?.journals || []).filter((entry) =>
+      entry.scheduleId === match.scheduleId
+      && entry.checklogId !== journal.checklogId
+      && !recordIdsForJournal(entry).includes(String(record?.recordId || ""))
+    );
+    if (unrelated.length) {
+      throw new Error(`${ROUTES[routeKey].label}目标排班还关联其他日志，拒绝自动覆盖`);
+    }
+    return match;
+  }
+
+  const sameRoute = schedules.filter((schedule) =>
+    routeKeyForExistingRoute(schedule.patrolRoute) === routeKey
+  );
+  const sameVehicle = sameRoute.filter((schedule) =>
+    String(schedule.plateNumbers || "").trim() === String(draft.vehicle || "").trim()
+  );
+  if (sameVehicle.length) {
+    return uniqueExisting(sameVehicle, `${ROUTES[routeKey].label}同车排班`);
+  }
+  const samePeople = sameRoute.filter((schedule) =>
+    equalSets(
+      schedule.lawEnforcementOfficials,
+      draft.officers.join(";")
+    )
+  );
+  return uniqueExisting(samePeople, `${ROUTES[routeKey].label}同人员排班`);
+}
+
 function parseKilometer(value) {
   const match = String(value).match(/K?(\d+)\+(\d+)/i);
   return match ? { kilometer: match[1], meter: match[2] } : { kilometer: "", meter: "" };
+}
+
+function officialRecordTitle(date) {
+  const [year, month, day] = String(date).split("-");
+  return `${year}年${month}月${day}日巡查记录`;
 }
 
 function peopleFor(names) {
@@ -230,6 +500,7 @@ export function buildOfficialSubmitPlan({
   date,
   drafts,
   weather,
+  existingDay = null,
   attachmentSources = new Map(),
   dryRun = true,
   confirmToken = ""
@@ -240,6 +511,9 @@ export function buildOfficialSubmitPlan({
   const schedules = [];
   const records = [];
   const journals = [];
+  const claimedScheduleIds = new Set();
+  const claimedRecordIds = new Set();
+  const claimedJournalIds = new Set();
   for (const draft of usable) {
     const routeKey = routeKeyForDraft(draft);
     if (!routeKey) throw new Error(`无法映射线路：${draft.routeCode}`);
@@ -260,6 +534,28 @@ export function buildOfficialSubmitPlan({
     const end = parseKilometer(route.end);
     const scheduleRef = `schedule-${routeKey}`;
     const recordRef = `record-${routeKey}`;
+    const existingRecord = selectExistingRecord(
+      existingDay,
+      draft,
+      routeKey,
+      claimedRecordIds
+    );
+    const existingJournal = selectExistingJournal(
+      existingDay,
+      existingRecord,
+      claimedJournalIds
+    );
+    const existingSchedule = selectExistingSchedule(existingDay, {
+      routeKey,
+      draft,
+      journal: existingJournal,
+      record: existingRecord,
+      claimedIds: claimedScheduleIds
+    });
+    if (existingRecord) claimedRecordIds.add(existingRecord.recordId);
+    if (existingJournal) claimedJournalIds.add(existingJournal.checklogId);
+    if (existingSchedule) claimedScheduleIds.add(existingSchedule.scheduleId);
+
     const schedulePayload = {
       cateId: OFFICIAL_PROFILE.cateId,
       cateName: OFFICIAL_PROFILE.cateName,
@@ -273,23 +569,34 @@ export function buildOfficialSubmitPlan({
       schedulePersonnel: OFFICIAL_PROFILE.scheduler,
       schedulePersonnelId: OFFICIAL_PERSONNEL[OFFICIAL_PROFILE.scheduler].personId,
       patrolRoute: api.patrolRoute,
-      times: 1,
-      content: api.scheduleContent,
+      times: Number(existingSchedule?.times) || 1,
+      content: existingSchedule?.content || api.scheduleContent,
       oid: OFFICIAL_PROFILE.oid,
-      approve: ""
+      approve: existingSchedule?.approve ?? "",
+      ...(existingSchedule ? { scheduleId: existingSchedule.scheduleId } : {})
     };
     schedules.push({
       clientRef: scheduleRef,
-      mode: "upsert",
+      mode: existingSchedule ? "update" : "upsert",
       payload: schedulePayload
     });
 
+    const narrative = mergeSupplementalNarrative(
+      existingRecord?.describes,
+      draft.narrative
+    );
+    const attachmentPlan = existingAttachmentPlan(
+      existingRecord,
+      draft.readiness.included,
+      attachmentSources
+    );
     const recordPayload = {
+      ...(existingRecord?.recordNum ? { recordNum: existingRecord.recordNum } : {}),
       oid: OFFICIAL_PROFILE.oid,
       checkStartTime: draft.startTime,
       checkEndTime: draft.endTime,
       checkCategory: OFFICIAL_PROFILE.checkCategory,
-      checkType: OFFICIAL_PROFILE.checkType,
+      checkType: existingRecord?.checkType || OFFICIAL_PROFILE.checkType,
       address: "",
       cateId: OFFICIAL_PROFILE.cateId,
       cateName: OFFICIAL_PROFILE.cateName,
@@ -301,32 +608,42 @@ export function buildOfficialSubmitPlan({
       startMeter: start.meter,
       endKilometer: end.kilometer,
       endMeter: end.meter,
-      describes: draft.narrative,
+      ...(existingRecord?.desTemplateId
+        ? { desTemplateId: existingRecord.desTemplateId }
+        : {}),
+      describes: narrative,
       personIds: `${ids.join(",")},`,
       personName: `${draft.officers.join(",")},`,
-      certificateId: "",
+      certificateId: existingRecord?.certificateId || "",
       listPer: people,
-      listAtt: [],
-      listAbn: [],
-      listCaseDocs: [],
-      carCondition: "完好",
-      carConditionDescribe: "",
-      equipmentCondition: "齐全",
-      equipmentConditionDescribe: ""
+      listAtt: attachmentPlan.listAtt,
+      listAbn: Array.isArray(existingRecord?.listAbn) ? existingRecord.listAbn : [],
+      listCaseDocs: Array.isArray(existingRecord?.listCaseDocs)
+        ? existingRecord.listCaseDocs
+        : [],
+      carCondition: existingRecord?.carCondition || "完好",
+      carConditionDescribe: existingRecord?.carConditionDescribe || "",
+      equipmentCondition: existingRecord?.equipmentCondition || "齐全",
+      equipmentConditionDescribe: existingRecord?.equipmentConditionDescribe || "",
+      ...(existingRecord?.includingPeople
+        ? { includingPeople: existingRecord.includingPeople }
+        : {}),
+      ...(existingRecord?.successor ? { successor: existingRecord.successor } : {}),
+      ...(existingRecord?.manager ? { manager: existingRecord.manager } : {}),
+      ...(existingRecord ? { recordId: existingRecord.recordId } : {})
     };
     records.push({
       clientRef: recordRef,
       scheduleRef,
-      mode: "upsert",
+      mode: existingRecord ? "update" : "upsert",
       payload: recordPayload,
-      attachments: draft.readiness.included.map((photo) =>
-        attachmentFor(photo, attachmentSources)
-      )
+      attachments: attachmentPlan.uploads,
+      attachmentOrder: attachmentPlan.order
     });
 
     const journalPayload = {
       oid: OFFICIAL_PROFILE.oid,
-      title: `${toDisplayDate(date)}${route.code}巡查记录`,
+      title: officialRecordTitle(date),
       patrolType: "路巡",
       status: "",
       startCheckTime: draft.startTime,
@@ -346,15 +663,16 @@ export function buildOfficialSubmitPlan({
       checkProblem: "/",
       disposed: "/",
       stayDisposed: "/",
-      other: `1. ${draft.narrative}`,
+      other: `1. ${narrative}`,
       saveStatus: "2",
-      storageId: ""
+      storageId: existingJournal?.storageId || "",
+      ...(existingJournal ? { checklogId: existingJournal.checklogId } : {})
     };
     journals.push({
       clientRef: `journal-${routeKey}`,
       scheduleRef,
       recordRefs: [recordRef],
-      mode: "upsert",
+      mode: existingJournal ? "update" : "upsert",
       payload: journalPayload
     });
   }

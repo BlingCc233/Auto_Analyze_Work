@@ -190,7 +190,24 @@ function registerHandler(channel, action) {
 
 function registerOfficialHandlers() {
   registerHandler("official-status", () => officialSession.status());
-  registerHandler("official-open-login", () => officialSession.openLogin());
+  registerHandler("official-open-login", (payload) => {
+    const username = String(payload?.username || "").trim();
+    if (!username) return officialSession.openLogin();
+    const cred = findCredentials(username);
+    if (!cred) {
+      return {
+        ok: false,
+        error: {
+          code: "INVALID_CREDENTIAL",
+          message: `未找到用户"${username}"的帐密`
+        }
+      };
+    }
+    return officialSession.openLogin({
+      username: cred.username,
+      password: cred.password
+    });
+  });
   registerHandler("official-personnel", (payload) => officialSession.listPersonnel(payload));
   registerHandler("official-query-day", (payload) => officialSession.queryDay(payload));
   registerHandler("official-submit-plan", (payload) => officialSession.submitPlan(payload));
@@ -220,6 +237,9 @@ function registerOfficialHandlers() {
       users: listUsernames().map((username) => ({ username }))
     };
   });
+
+  // 退出登录
+  registerHandler("official-logout", () => officialSession.logout());
 }
 
 app.whenReady().then(async () => {
@@ -247,6 +267,35 @@ app.whenReady().then(async () => {
   });
   registerOfficialHandlers();
   await createWorkbenchWindow();
+
+  // --auto-test 模式：自动触发登录测试
+  const autoTestUser = process.argv.find(a => a.startsWith('--auto-test='));
+  if (autoTestUser) {
+    const username = autoTestUser.split('=')[1];
+    console.log(`[main] AUTO-TEST mode: auto-login as "${username}"`);
+    setTimeout(async () => {
+      try {
+        const cred = findCredentials(username);
+        if (!cred) {
+          console.log('[main] AUTO-TEST: user not found');
+          return;
+        }
+        console.log(`[main] AUTO-TEST: starting autoLogin for ${cred.username}...`);
+        const result = await officialSession.autoLogin(cred.username, cred.password);
+        console.log(`[main] AUTO-TEST: result authenticated=${result?.authenticated} serviceReady=${result?.serviceReady}`);
+        if (result?.authenticated) {
+          console.log('[main] AUTO-TEST: SUCCESS - login succeeded!');
+          app.exit(0);
+        } else {
+          console.log('[main] AUTO-TEST: FAILED - login did not succeed');
+          app.exit(1);
+        }
+      } catch (e) {
+        console.log(`[main] AUTO-TEST: ERROR - ${e.message}`);
+        app.exit(2);
+      }
+    }, 3000); // 等3秒让窗口初始化完成
+  }
 
   app.on("activate", () => {
     createWorkbenchWindow().catch((error) => {

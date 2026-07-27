@@ -235,6 +235,31 @@ svg {
   align-items: center;
 }
 
+.icon-button.logout-btn {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--red);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.icon-button.logout-btn:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+}
+
+.icon-button.logout-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .action-strip {
   position: sticky;
   z-index: 30;
