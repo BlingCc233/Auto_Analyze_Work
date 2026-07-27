@@ -88,7 +88,9 @@ const officialOperations = new Map([
   ["POST /api/official/query-day", "queryDay"],
   ["POST /api/official/submit-plan", "submitPlan"],
   ["POST /api/official/readback", "readback"],
-  ["POST /api/official/rollback", "rollback"]
+  ["POST /api/official/rollback", "rollback"],
+  ["POST /api/official/auto-login", "autoLogin"],
+  ["GET /api/official/credentials", "credentials"]
 ]);
 
 function safeDailyFile(pathname) {

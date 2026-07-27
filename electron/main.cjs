@@ -6,6 +6,10 @@ const {
   safeError,
   sanitizeForRenderer
 } = require("./official-session.cjs");
+const {
+  listUsernames,
+  findCredentials
+} = require("./credentials.cjs");
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
@@ -195,6 +199,27 @@ function registerOfficialHandlers() {
 
   // Compatibility for the current renderer while it migrates to official-open-login.
   registerHandler("open-official", () => officialSession.openLogin());
+
+  // 自动登录：前端传用户名，主进程查找密码并执行自动登录
+  registerHandler("official-auto-login", (payload) => {
+    const username = String(payload?.username || "").trim();
+    if (!username) {
+      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: "请选择登录用户" } };
+    }
+    const cred = findCredentials(username);
+    if (!cred) {
+      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: `未找到用户"${username}"的帐密` } };
+    }
+    return officialSession.autoLogin(cred.username, cred.password);
+  });
+
+  // 返回可选用户列表（仅用户名，不含密码）
+  registerHandler("official-credentials", () => {
+    return {
+      ok: true,
+      users: listUsernames().map((username) => ({ username }))
+    };
+  });
 }
 
 app.whenReady().then(async () => {

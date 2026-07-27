@@ -189,6 +189,52 @@ svg {
   white-space: nowrap;
 }
 
+/* 自动登录 */
+.login-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.credential-select {
+  min-width: 100px;
+  max-width: 150px;
+  height: 32px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.credential-select:focus {
+  border-color: var(--green);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(23, 99, 63, 0.12);
+}
+
+.auto-login-btn {
+  font-size: 12px;
+  padding: 0 12px;
+  height: 32px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.auto-login-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auto-login-error {
+  color: var(--red);
+  display: flex;
+  align-items: center;
+}
+
 .action-strip {
   position: sticky;
   z-index: 30;

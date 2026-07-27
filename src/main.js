@@ -99,6 +99,11 @@ const state = {
   dateSynchronized: false,
   weather: "",
   confirmedCondition: "畅通",
+  // 自动登录
+  credentialUsers: [],
+  selectedCredentialUser: "",
+  autoLoggingIn: false,
+  autoLoginError: "",
   photos: [],
   loadingFolder: false,
   running: false,
@@ -261,7 +266,9 @@ function desktopMethod(name) {
     queryDay: ["queryDay", "officialQueryDay"],
     submitPlan: ["submitPlan", "officialSubmitPlan"],
     readback: ["readback", "officialReadback"],
-    rollback: ["rollback", "officialRollback"]
+    rollback: ["rollback", "officialRollback"],
+    autoLogin: ["autoLogin", "officialAutoLogin"],
+    credentials: ["credentials", "officialCredentials"]
   };
   const methodName = aliases[name]?.find((candidate) => typeof bridge[candidate] === "function");
   return methodName ? bridge[methodName].bind(bridge) : null;
@@ -274,7 +281,9 @@ const WEB_OFFICIAL_ENDPOINTS = Object.freeze({
   queryDay: ["POST", "/api/official/query-day"],
   submitPlan: ["POST", "/api/official/submit-plan"],
   readback: ["POST", "/api/official/readback"],
-  rollback: ["POST", "/api/official/rollback"]
+  rollback: ["POST", "/api/official/rollback"],
+  autoLogin: ["POST", "/api/official/auto-login"],
+  credentials: ["GET", "/api/official/credentials"]
 });
 
 function hasLocalWebBridge() {
@@ -1066,6 +1075,50 @@ async function refreshDesktopStatus() {
   render();
 }
 
+async function loadCredentialUsers() {
+  try {
+    const method = officialMethod("credentials");
+    if (!method) return;
+    const result = await method();
+    if (result?.ok && Array.isArray(result.users)) {
+      state.credentialUsers = result.users.map((u) => u.username).filter(Boolean);
+      if (state.credentialUsers.length > 0 && !state.selectedCredentialUser) {
+        // 默认选中第一个匹配当前默认人员的用户
+        const defaults = state.routeProfiles.g6.officers;
+        const match = state.credentialUsers.find((u) => defaults.includes(u));
+        state.selectedCredentialUser = match || state.credentialUsers[0];
+      }
+    }
+  } catch {
+    // 非桌面版或无 credentials 方法时静默忽略
+  }
+}
+
+async function autoLogin() {
+  if (!state.selectedCredentialUser || state.autoLoggingIn || state.running) return;
+  state.autoLoggingIn = true;
+  state.autoLoginError = "";
+  render();
+  try {
+    const result = await callDesktop("autoLogin", state.selectedCredentialUser);
+    state.desktopStatus = result;
+    if (result.authenticated && result.serviceReady) {
+      await synchronizeOfficialPersonnel();
+      addActivity(`已自动登录为 ${state.selectedCredentialUser}`, "success");
+    } else {
+      state.autoLoginError = "登录未完全成功，请重试或手动登录";
+      addActivity(state.autoLoginError, "warn");
+    }
+  } catch (error) {
+    state.autoLoginError = error?.message || "自动登录失败";
+    state.desktopStatus = { authenticated: false, serviceReady: false, error: issueFromError(error) };
+    addActivity(state.autoLoginError, "error");
+  } finally {
+    state.autoLoggingIn = false;
+    render();
+  }
+}
+
 function statusClass() {
   if (!hasDesktopBridge()) return "browser";
   if (state.desktopStatus?.authenticated && state.desktopStatus?.serviceReady) return "online";
@@ -1468,12 +1521,33 @@ function render() {
           <div><strong>韵家口巡查工作台</strong><span>巡查登记与回读核验</span></div>
         </div>
         <div class="header-status">
+          ${desktop && state.credentialUsers.length > 0 ? `
+          <div class="login-area">
+            <select id="credential-select" class="field-control credential-select" ${state.autoLoggingIn || state.running ? "disabled" : ""} aria-label="选择登录用户">
+              ${state.credentialUsers.map((username) =>
+                `<option value="${escapeHtml(username)}" ${state.selectedCredentialUser === username ? "selected" : ""}>${escapeHtml(username)}</option>`
+              ).join("")}
+            </select>
+            <button id="auto-login-btn" class="session-state ${statusClass()} auto-login-btn"
+                    ${state.autoLoggingIn || state.running ? "disabled" : ""}
+                    title="一键自动登录官方系统（自动过滑块）">
+              ${state.autoLoggingIn ? icon("loader-circle", 14, "spin") : `<span class="session-dot"></span>`}
+              ${state.autoLoggingIn ? "登录中..." : (state.desktopStatus?.authenticated ? escapeHtml(statusLabel()) : "一键登录")}
+            </button>
+            ${!state.desktopStatus?.authenticated ? `
+            <button id="manual-login-btn" class="icon-button" title="手动打开登录窗口" aria-label="手动登录">
+              ${icon("external-link", 15)}
+            </button>` : ""}
+          </div>
+          ` : `
           <button id="session-status" class="session-state ${statusClass()}" title="${desktop ? "查看或打开官方系统登录窗口" : "本地自动化服务未连接"}">
             <span class="session-dot"></span>
             ${escapeHtml(statusLabel())}
             ${desktop ? icon("external-link", 14) : ""}
           </button>
+          `}
           <span class="security-state">${icon("lock-keyhole", 14)}凭据不保存</span>
+          ${state.autoLoginError ? `<span class="auto-login-error" title="${escapeHtml(state.autoLoginError)}">${icon("alert-circle", 14)}</span>` : ""}
         </div>
       </header>
 
@@ -1703,6 +1777,25 @@ function bind() {
     }
   });
 
+  // 自动登录：用户选择下拉
+  $("#credential-select")?.addEventListener("change", (event) => {
+    state.selectedCredentialUser = event.target.value;
+    render();
+  });
+
+  // 自动登录：一键登录按钮
+  $("#auto-login-btn")?.addEventListener("click", autoLogin);
+
+  // 手动登录兜底按钮
+  $("#manual-login-btn")?.addEventListener("click", async () => {
+    try {
+      state.desktopStatus = await callDesktop("openLogin");
+    } catch (error) {
+      state.issues = [issueFromError(error), ...state.issues];
+    }
+    render();
+  });
+
   $("#folder-files")?.addEventListener("change", (event) => useFiles(event.target.files));
   $("#image-files")?.addEventListener("change", (event) => useFiles(event.target.files));
   const dropZone = $("#drop-zone");
@@ -1858,3 +1951,4 @@ function bind() {
 render();
 synchronizeBusinessDate();
 refreshDesktopStatus();
+loadCredentialUsers();

@@ -8,7 +8,10 @@ const dutyDesktop = Object.freeze({
   officialSubmitPlan: (plan) => ipcRenderer.invoke("official-submit-plan", plan),
   officialReadback: (query) => ipcRenderer.invoke("official-readback", query),
   officialRollback: (request) => ipcRenderer.invoke("official-rollback", request),
-  openOfficial: () => ipcRenderer.invoke("official-open-login")
+  openOfficial: () => ipcRenderer.invoke("official-open-login"),
+  // 自动登录
+  officialAutoLogin: (username) => ipcRenderer.invoke("official-auto-login", { username }),
+  officialCredentials: () => ipcRenderer.invoke("official-credentials")
 });
 
 contextBridge.exposeInMainWorld("dutyDesktop", dutyDesktop);

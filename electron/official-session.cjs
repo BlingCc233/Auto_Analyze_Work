@@ -1312,6 +1312,424 @@ class OfficialSession {
     return this.status({ createWindow: false });
   }
 
+  // ─── 自动登录 ────────────────────────────────────────────────
+
+  async _waitForPageReady() {
+    if (!this._isWindowUsable()) return;
+    const wc = this.window.webContents;
+    try {
+      await wc.executeJavaScript(
+        'new Promise((resolve) => { if (document.readyState === "complete") resolve(); else window.addEventListener("load", resolve, { once: true }); })'
+      );
+    } catch {
+      // Ignore if page isn't ready for JS execution
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+
+  async _fillLoginForm(username, password) {
+    if (!this._isWindowUsable()) return false;
+    const wc = this.window.webContents;
+    try {
+      const result = await wc.executeJavaScript(`(() => {
+        const u = ${JSON.stringify(String(username))};
+        const p = ${JSON.stringify(String(password))};
+
+        function setNativeValue(el, value) {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          setter.call(el, value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        // 查找用户名输入框
+        const usernameSelectors = [
+          'input[placeholder*="用户名"]', 'input[placeholder*="账号"]',
+          'input[placeholder*="手机"]', 'input[name="username"]',
+          'input[name="account"]', 'input[type="text"]:not([readonly])',
+          '.el-input input[type="text"]', '#username', '#account',
+          'input:not([type="password"]):not([type="hidden"]):not([readonly])'
+        ];
+        const passwordSelectors = [
+          'input[placeholder*="密码"]', 'input[name="password"]',
+          'input[type="password"]', '.el-input input[type="password"]',
+          '#password'
+        ];
+
+        let usernameEl = null;
+        for (const sel of usernameSelectors) {
+          usernameEl = document.querySelector(sel);
+          if (usernameEl) break;
+        }
+        let passwordEl = null;
+        for (const sel of passwordSelectors) {
+          passwordEl = document.querySelector(sel);
+          if (passwordEl) break;
+        }
+
+        if (!usernameEl || !passwordEl) {
+          return { ok: false, usernameFound: !!usernameEl, passwordFound: !!passwordEl };
+        }
+
+        setNativeValue(usernameEl, u);
+        setNativeValue(passwordEl, p);
+        return { ok: true, usernameFound: true, passwordFound: true };
+      })()`);
+      return result && result.ok;
+    } catch (error) {
+      this._log("warn", "[auto-login] fillForm failed:", error.message);
+      return false;
+    }
+  }
+
+  async _clickLoginButton() {
+    if (!this._isWindowUsable()) return false;
+    const wc = this.window.webContents;
+    try {
+      return await wc.executeJavaScript(`(() => {
+        const buttons = document.querySelectorAll('button, .el-button, span.el-button, [role="button"]');
+        for (const btn of buttons) {
+          if (/登录|登\\s*录|login/i.test(btn.textContent || "")) {
+            btn.click();
+            return true;
+          }
+        }
+        // 尝试按回车提交
+        const form = document.querySelector('form');
+        if (form) { form.dispatchEvent(new Event('submit', { bubbles: true })); return true; }
+        // 尝试发送回车到密码框
+        const pwdEl = document.querySelector('input[type="password"]');
+        if (pwdEl) {
+          pwdEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+          return true;
+        }
+        return false;
+      })()`);
+    } catch {
+      return false;
+    }
+  }
+
+  async _detectSlider() {
+    if (!this._isWindowUsable()) return null;
+    const wc = this.window.webContents;
+    try {
+      return await wc.executeJavaScript(`(() => {
+        // 滑块容器选择器（按优先级）
+        const containerSelectors = [
+          '.dx_captcha_slider', '.slider-container', '.captcha-slider',
+          '.verify-slider', '.slide-verify', '.slider-verify',
+          '.nc_wrapper', '.nc-container', '.geetest_slider',
+          '.verify-box', '.captcha-box', '.drag-slider',
+          '[class*="slider"]', '[class*="slide"]', '[class*="captcha"]',
+          '[class*="verify"]', '[class*="drag"]'
+        ];
+        // 滑块按钮/thumb 选择器
+        const handleSelectors = [
+          '.dx_captcha_slider-btn', '.slider-btn', '.slider-thumb',
+          '.slider-handle', '.slider-button', '.drag-btn',
+          '.verify-btn', '.nc_iconfont', '.btn_slide',
+          '[class*="slider-btn"]', '[class*="handle"]', '[class*="thumb"]',
+          '[class*="block"]', '.slider > button', '.slider > div[class*="btn"]'
+        ];
+
+        let container = null;
+        let containerSel = "";
+        for (const sel of containerSelectors) {
+          container = document.querySelector(sel);
+          if (container && container.offsetParent !== null) {
+            containerSel = sel;
+            break;
+          }
+        }
+        if (!container) return null;
+
+        let handle = null;
+        for (const sel of handleSelectors) {
+          handle = container.querySelector(sel);
+          if (handle && handle.offsetParent !== null) break;
+        }
+        // 如果找不到特定 handle，用 container 自身
+        if (!handle) handle = container;
+
+        const cRect = container.getBoundingClientRect();
+        const hRect = handle.getBoundingClientRect();
+
+        return {
+          found: true,
+          containerSelector: containerSel,
+          containerRect: { x: cRect.x, y: cRect.y, width: cRect.width, height: cRect.height },
+          handleRect: { x: hRect.x, y: hRect.y, width: hRect.width, height: hRect.height },
+          // 滑块可拖动的总宽度
+          trackWidth: cRect.width - hRect.width - 4
+        };
+      })()`);
+    } catch {
+      return null;
+    }
+  }
+
+  async _simulateSliderDrag(sliderInfo) {
+    if (!sliderInfo || !this._isWindowUsable()) return false;
+    const wc = this.window.webContents;
+
+    // 计算鼠标坐标（相对于 viewport）
+    const startX = Math.round(
+      sliderInfo.handleRect.x + sliderInfo.handleRect.width / 2
+    );
+    const startY = Math.round(
+      sliderInfo.handleRect.y + sliderInfo.handleRect.height / 2
+    );
+    const endX = Math.round(
+      sliderInfo.containerRect.x + sliderInfo.containerRect.width
+        - sliderInfo.handleRect.width / 2 - 2
+    );
+    const endY = startY;
+
+    // 附加 debugger 以使用 CDP Input.dispatchMouseEvent
+    let attached = false;
+    try {
+      wc.debugger.attach("1.3");
+      attached = true;
+    } catch (error) {
+      if (error.message && error.message.includes("already attached")) {
+        try { wc.debugger.detach(); } catch {}
+        wc.debugger.attach("1.3");
+        attached = true;
+      } else {
+        this._log("warn", "[auto-login] debugger attach failed:", error.message);
+        return false;
+      }
+    }
+
+    try {
+      // mousePressed — 按下滑块
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: startX,
+        y: startY,
+        button: "left",
+        clickCount: 1
+      });
+
+      // 停顿模拟人类反应时间
+      await new Promise((resolve) => setTimeout(resolve, 60 + Math.random() * 90));
+
+      // mouseMoved — 分步拖拽（10~15 步，带 Y 轴微颤）
+      const steps = 10 + Math.floor(Math.random() * 6);
+      const stepDX = (endX - startX) / steps;
+      for (let index = 1; index <= steps; index += 1) {
+        const currentX = startX + stepDX * index;
+        const yWobble = Math.sin(index * 0.4) * 1.5 + (Math.random() - 0.5) * 1;
+        await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: Math.round(currentX),
+          y: Math.round(startY + yWobble),
+          button: "left",
+          movementX: Math.round(stepDX),
+          movementY: 0
+        });
+        // 延迟：开始快，接近终点慢（人类特征）
+        const delay = 6 + Math.random() * (index > steps * 0.65 ? 28 : 12);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      // 释放前短暂停顿
+      await new Promise((resolve) => setTimeout(resolve, 30 + Math.random() * 80));
+
+      // mouseReleased — 释放滑块
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: endX,
+        y: endY,
+        button: "left",
+        clickCount: 1
+      });
+
+      return true;
+    } catch (error) {
+      this._log("warn", "[auto-login] slider drag failed:", error.message);
+      return false;
+    } finally {
+      try { wc.debugger.detach(); } catch {}
+    }
+  }
+
+  async _pollLoginSuccess(deadline) {
+    if (!this._isWindowUsable()) return false;
+    const wc = this.window.webContents;
+
+    while (Date.now() < deadline) {
+      try {
+        const hasToken = await wc.executeJavaScript(`(() => {
+          try {
+            return [window.localStorage, window.sessionStorage].some((store) => {
+              for (let index = 0; index < store.length; index += 1) {
+                const key = store.key(index);
+                if (/^TokenKey$/i.test(String(key)) && Boolean(store.getItem(key))) return true;
+              }
+              return false;
+            });
+          } catch { return false; }
+        })()`);
+
+        if (hasToken) {
+          // 验证 Token 真正有效：发一次 status 检测
+          const pageStatus = await this._executePage({ type: "status" });
+          if (pageStatus.authenticated && pageStatus.serviceReady) return true;
+          // Token 存在但无效（可能过期），继续等待
+        }
+
+        // 检查页面上有无错误提示
+        try {
+          const errorMsg = await wc.executeJavaScript(`(() => {
+            const els = document.querySelectorAll('.el-message--error, [class*="error"], .msg-error, .login-error, .err-tip');
+            for (const el of els) {
+              if (el.offsetParent && el.innerText) return el.innerText.trim().slice(0, 200);
+            }
+            return "";
+          })()`);
+          if (errorMsg) {
+            this._log("warn", `[auto-login] page error: ${errorMsg}`);
+          }
+        } catch {}
+      } catch {
+        // 页面可能正在跳转，忽略 JS 执行错误
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+
+    return false;
+  }
+
+  async autoLogin(username, password) {
+    if (typeof username !== "string" || !username.trim()) {
+      throw new OfficialSessionError("INVALID_CREDENTIAL", "用户名不能为空");
+    }
+    if (typeof password !== "string" || !password.trim()) {
+      throw new OfficialSessionError("INVALID_CREDENTIAL", "密码不能为空");
+    }
+
+    // 1. 先检查是否已登录
+    const current = await this.status();
+    if (current.authenticated && current.serviceReady) {
+      this._log("log", "[auto-login] already authenticated, skipping");
+      return current;
+    }
+
+    // 2. 如果已有窗口但不在登录页，关闭重建（避免缓存状态干扰）
+    if (this._isWindowUsable()) {
+      try { this.window.destroy(); } catch {}
+      this.window = null;
+      this.loadPromise = null;
+    }
+
+    // 3. 创建新窗口并导航到官方系统首页（未登录会自动跳转登录页）
+    this.window = new this.BrowserWindow({
+      width: 1320,
+      height: 900,
+      minWidth: 980,
+      minHeight: 680,
+      show: false,
+      title: "青海省交通运输行政执法综合管理信息系统 - 自动登录",
+      backgroundColor: "#f4f6f8",
+      webPreferences: {
+        partition: this.partition,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true
+      }
+    });
+    this._attachWindowGuards(this.window);
+    this.window.on("closed", () => {
+      this.window = null;
+      this.loadPromise = null;
+    });
+
+    // 加载官方系统页面
+    await this.window.loadURL(this.officialUrl);
+    await this._waitForPageReady();
+
+    // 4. 尝试最多 3 轮自动登录
+    const deadline = Date.now() + 120000; // 2 分钟总超时
+    for (let round = 0; round < 3; round += 1) {
+      if (Date.now() >= deadline) break;
+
+      this._log("log", `[auto-login] round ${round + 1}/3`);
+
+      // 4a. 填写帐密
+      const filled = await this._fillLoginForm(username, password);
+      if (!filled) {
+        this._log("warn", "[auto-login] could not fill login form, retrying...");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      // 4b. 点击登录按钮
+      await this._clickLoginButton();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // 4c. 检测滑块
+      const slider = await this._detectSlider();
+
+      if (slider && slider.found) {
+        this._log("log", `[auto-login] slider detected: ${slider.containerSelector}, dragging...`);
+        const dragged = await this._simulateSliderDrag(slider);
+        if (!dragged) {
+          this._log("warn", "[auto-login] slider drag failed, retrying...");
+          // 刷新重试
+          try { await this.window.loadURL(this.officialUrl); } catch {}
+          await this._waitForPageReady();
+          continue;
+        }
+      } else {
+        this._log("log", "[auto-login] no slider detected, waiting for login...");
+      }
+
+      // 4d. 轮询等登录成功
+      const success = await this._pollLoginSuccess(deadline);
+      if (success) {
+        this._log("log", "[auto-login] login succeeded");
+        // 导航回业务页面
+        try { await this.window.loadURL(this.officialUrl); } catch {}
+        await this._waitForPageReady();
+        return this.status({ createWindow: false });
+      }
+
+      this._log("warn", `[auto-login] round ${round + 1} timed out, retrying...`);
+      // 刷新页面重试
+      try { await this.window.loadURL(this.officialUrl); } catch {}
+      await this._waitForPageReady();
+    }
+
+    // 5. 全部自动尝试失败，打开窗口让用户手动完成
+    this._log("warn", "[auto-login] all automatic rounds exhausted, showing window for manual login");
+    if (this._isWindowUsable()) {
+      this.window.show();
+      this.window.focus();
+    }
+
+    // 等待手动登录完成
+    const manualDeadline = Date.now() + 180000;
+    while (Date.now() < manualDeadline) {
+      const status = await this.status({ createWindow: false });
+      if (status.authenticated && status.serviceReady) {
+        this._log("log", "[auto-login] manual login succeeded");
+        return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+
+    throw new OfficialSessionError(
+      "LOGIN_TIMEOUT",
+      "自动登录超时，请检查帐密是否正确，或手动在弹出窗口中完成登录"
+    );
+  }
+
   async _executePage(operation) {
     const run = async () => {
       await this.ensureWindow({ show: false });

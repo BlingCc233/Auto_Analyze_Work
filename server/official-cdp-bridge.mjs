@@ -375,6 +375,124 @@ export class CdpOfficialBridge {
     return (await this._connectBest()).official.rollback(payload);
   }
 
+  async credentials() {
+    try {
+      const { listUsernames } = require("../electron/credentials.cjs");
+      return {
+        ok: true,
+        users: listUsernames().map((username) => ({ username }))
+      };
+    } catch {
+      return { ok: true, users: [] };
+    }
+  }
+
+  async autoLogin(payload) {
+    const username = String(payload?.username || "").trim();
+    if (!username) {
+      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: "请提供用户名" } };
+    }
+
+    let cred;
+    try {
+      const { findCredentials } = require("../electron/credentials.cjs");
+      cred = findCredentials(username);
+    } catch {
+      return { ok: false, error: { code: "NO_CREDENTIALS", message: "开发模式暂不支持自动登录（无法读取帐密模块）" } };
+    }
+    if (!cred) {
+      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: `未找到用户"${username}"的帐密` } };
+    }
+
+    let active;
+    try {
+      active = await this._connectBest();
+    } catch (error) {
+      if (error.code !== "OFFICIAL_PAGE_NOT_FOUND") throw error;
+      const encoded = encodeURIComponent(OFFICIAL_RECORD_URL);
+      await putJson(`${this.cdpEndpoint}/json/new?${encoded}`);
+      active = await this._connectBest();
+    }
+
+    const connection = active.connection;
+
+    // 导航到登录页
+    await connection.call("Page.navigate", { url: OFFICIAL_RECORD_URL });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    // 填写帐密
+    await connection.evaluate(`(() => {
+      const u = ${JSON.stringify(cred.username)};
+      const p = ${JSON.stringify(cred.password)};
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      const inputs = document.querySelectorAll('input');
+      for (const el of inputs) {
+        if (el.type === 'password') {
+          setter.call(el, p);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        } else if (el.type === 'text' || !el.type) {
+          setter.call(el, u);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+      // 点击登录
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (/登录/.test(btn.textContent || '')) { btn.click(); break; }
+      }
+    })()`);
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // 检测并模拟滑块
+    const slider = await connection.evaluate(`(() => {
+      const s = document.querySelector('.slider-container, .captcha-slider, .verify-slider, [class*="slider"], [class*="slide"]');
+      if (!s || !s.offsetParent) return null;
+      const sr = s.getBoundingClientRect();
+      const h = s.querySelector('[class*="btn"], [class*="handle"], [class*="thumb"], button');
+      const hr = h ? h.getBoundingClientRect() : sr;
+      return {
+        startX: hr.x + hr.width / 2,
+        startY: hr.y + hr.height / 2,
+        endX: sr.x + sr.width - hr.width / 2 - 2,
+        endY: hr.y + hr.height / 2
+      };
+    })()`);
+
+    if (slider) {
+      // CDP 模拟鼠标拖拽
+      await connection.call("Input.dispatchMouseEvent", {
+        type: "mousePressed", x: Math.round(slider.startX), y: Math.round(slider.startY),
+        button: "left", clickCount: 1
+      });
+      const steps = 12;
+      const dx = (slider.endX - slider.startX) / steps;
+      for (let i = 1; i <= steps; i++) {
+        await new Promise((r) => setTimeout(r, 8 + Math.random() * 18));
+        await connection.call("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: Math.round(slider.startX + dx * i),
+          y: Math.round(slider.startY + Math.sin(i * 0.4) * 1.5),
+          button: "left", movementX: Math.round(dx), movementY: 0
+        });
+      }
+      await new Promise((r) => setTimeout(r, 40));
+      await connection.call("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: Math.round(slider.endX), y: Math.round(slider.endY),
+        button: "left", clickCount: 1
+      });
+    }
+
+    // 等登录
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const s = await this.status();
+      if (s.authenticated) return s;
+    }
+
+    return this.status();
+  }
+
   async invoke(name, payload) {
     const methods = {
       status: () => this.status(),
@@ -383,7 +501,9 @@ export class CdpOfficialBridge {
       queryDay: () => this.queryDay(payload),
       submitPlan: () => this.submitPlan(payload),
       readback: () => this.readback(payload),
-      rollback: () => this.rollback(payload)
+      rollback: () => this.rollback(payload),
+      autoLogin: () => this.autoLogin(payload),
+      credentials: () => this.credentials()
     };
     if (!methods[name]) {
       const error = new Error("未知官方系统桥接操作");
