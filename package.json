@@ -1,0 +1,87 @@
+{
+  "name": "qh-duty-desk",
+  "version": "0.1.0",
+  "description": "韵家口大队巡查记录工作台",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "vite build",
+    "build:native-ocr:mac": "swiftc scripts/apple-vision-ocr.swift -o build/apple-vision-ocr",
+    "test": "node --test",
+    "benchmark:acceptance": "node scripts/benchmark-acceptance.mjs",
+    "benchmark:native-ocr": "node scripts/benchmark-native-ocr.mjs",
+    "benchmark:holdout": "node scripts/benchmark-holdout.mjs",
+    "dry-run:acceptance": "node scripts/dry-run-acceptance.mjs",
+    "benchmark:history": "node scripts/benchmark-history.mjs",
+    "benchmark:history:report": "node scripts/benchmark-history.mjs --report-only",
+    "train:history": "node scripts/train-history-knowledge.mjs",
+    "export:history": "node scripts/export-history-fixtures.mjs",
+    "ocr:history:mac": "swift scripts/apple-vision-ocr.swift",
+    "desktop:dev": "npm run build && electron electron/main.cjs",
+    "package:mac": "npm run build:native-ocr:mac && npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win",
+    "package:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "lucide": "^0.468.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "electron": "37.2.3",
+    "electron-builder": "26.0.12",
+    "vite": "^8.1.0"
+  },
+  "build": {
+    "appId": "cn.qh.yunjiaokou.patrol-desk",
+    "productName": "韵家口巡查工作台",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "server/native-ocr.mjs",
+        "to": "server/native-ocr.mjs"
+      },
+      {
+        "from": "public/ocr-data",
+        "to": "ocr/tesseract",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "extraResources": [
+        {
+          "from": "scripts/apple-vision-ocr.swift",
+          "to": "scripts/apple-vision-ocr.swift"
+        },
+        {
+          "from": "build/apple-vision-ocr",
+          "to": "ocr/bin/apple-vision-ocr"
+        }
+      ],
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icons",
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}
