@@ -57,7 +57,7 @@ jobs:
           npm pkg set version=$version
 
       - name: Run tests
-        run: npm test
+        run: npm run test:ci
 
       - name: Build installer
         shell: pwsh
@@ -103,7 +103,7 @@ jobs:
           npm pkg set version="${tag#v}"
 
       - name: Run tests
-        run: npm test
+        run: npm run test:ci
 
       - name: Build arm64 DMG
         run: |
