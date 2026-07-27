@@ -53,8 +53,8 @@ jobs:
       - name: Set package version
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag }}".TrimStart("v")
-          npm version --no-git-tag-version $version
+          $version = "${{ inputs.tag }}".Substring(1)
+          npm pkg set version=$version
 
       - name: Run tests
         run: npm test
@@ -75,8 +75,8 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: macOS Universal
-    runs-on: macos-14
+    name: macOS arm64
+    runs-on: macos-15
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -98,36 +98,26 @@ jobs:
         run: npm ci
 
       - name: Set package version
-        run: npm version --no-git-tag-version "${{ inputs.tag }}" 
+        run: |
+          tag="${{ inputs.tag }}"
+          npm pkg set version="${tag#v}"
 
       - name: Run tests
         run: npm test
 
-      - name: Build universal OCR helper
+      - name: Build arm64 DMG
         run: |
-          mkdir -p build
-          swiftc -target x86_64-apple-macos10.15 scripts/apple-vision-ocr.swift \
-            -o build/apple-vision-ocr-x64
-          swiftc -target arm64-apple-macos11 scripts/apple-vision-ocr.swift \
-            -o build/apple-vision-ocr-arm64
-          lipo -create \
-            build/apple-vision-ocr-x64 \
-            build/apple-vision-ocr-arm64 \
-            -output build/apple-vision-ocr
-          lipo -info build/apple-vision-ocr
-
-      - name: Build DMG
-        run: |
+          npm run build:native-ocr:mac
           npm run build
-          npx electron-builder --mac dmg --universal \
+          npx electron-builder --mac dmg --arm64 \
             --config.electronVersion=22.3.27 \
-            --config.mac.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-universal.dmg
+            --config.mac.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-arm64.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: macOS-universal
-          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-universal.dmg
+          name: macOS-arm64
+          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-arm64.dmg
           if-no-files-found: error
 
   publish:
