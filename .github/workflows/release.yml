@@ -1,0 +1,161 @@
+name: Release Electron
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.0.1
+        required: true
+        default: v0.0.1
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Windows ${{ matrix.label }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows 7
+            electron: 22.3.27
+            suffix: Win7-x64
+          - label: Windows 10 and 11
+            electron: 37.2.3
+            suffix: Win10-11-x64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          if ("${{ inputs.tag }}" -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Tag must use the vMAJOR.MINOR.PATCH format."
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.tag }}".TrimStart("v")
+          npm version --no-git-tag-version $version
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          npm run build
+          npx electron-builder --win nsis --x64 `
+            --config.electronVersion=${{ matrix.electron }} `
+            --config.win.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-${{ matrix.suffix }}.exe
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.suffix }}
+          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-${{ matrix.suffix }}.exe
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS Universal
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release tag
+        run: |
+          [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Tag must use the vMAJOR.MINOR.PATCH format." >&2
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version
+        run: npm version --no-git-tag-version "${{ inputs.tag }}" 
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build universal OCR helper
+        run: |
+          mkdir -p build
+          swiftc -target x86_64-apple-macos10.15 scripts/apple-vision-ocr.swift \
+            -o build/apple-vision-ocr-x64
+          swiftc -target arm64-apple-macos11 scripts/apple-vision-ocr.swift \
+            -o build/apple-vision-ocr-arm64
+          lipo -create \
+            build/apple-vision-ocr-x64 \
+            build/apple-vision-ocr-arm64 \
+            -output build/apple-vision-ocr
+          lipo -info build/apple-vision-ocr
+
+      - name: Build DMG
+        run: |
+          npm run build
+          npx electron-builder --mac dmg --universal \
+            --config.electronVersion=22.3.27 \
+            --config.mac.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-universal.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-universal
+          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-universal.dmg
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-macos
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-files/* --clobber
+          else
+            gh release create "$TAG" release-files/* \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --generate-notes
+          fi
