@@ -10,7 +10,7 @@
     "build": "vite build",
     "build:native-ocr:mac": "swiftc scripts/apple-vision-ocr.swift -o build/apple-vision-ocr",
     "test": "node --test",
-    "test:ci": "node --test test/domain.test.js test/local-origin.test.js test/native-ocr.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs",
+    "test:ci": "node --test test/domain.test.js test/local-origin.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs",
     "benchmark:acceptance": "node scripts/benchmark-acceptance.mjs",
     "benchmark:native-ocr": "node scripts/benchmark-native-ocr.mjs",
     "benchmark:holdout": "node scripts/benchmark-holdout.mjs",

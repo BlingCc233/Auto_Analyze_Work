@@ -64,6 +64,7 @@ jobs:
         run: |
           npm run build
           npx electron-builder --win nsis --x64 `
+            --publish never `
             --config.electronVersion=${{ matrix.electron }} `
             --config.win.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-${{ matrix.suffix }}.exe
 
@@ -110,6 +111,7 @@ jobs:
           npm run build:native-ocr:mac
           npm run build
           npx electron-builder --mac dmg --arm64 \
+            --publish never \
             --config.electronVersion=22.3.27 \
             --config.mac.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-arm64.dmg
 
