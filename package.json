@@ -2,6 +2,10 @@
   "name": "qh-duty-desk",
   "version": "0.0.2",
   "description": "韵家口大队巡查记录工作台",
+  "author": {
+    "name": "blingcc",
+    "email": "1342171891@qq.com"
+  },
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
