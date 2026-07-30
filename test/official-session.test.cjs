@@ -77,6 +77,11 @@ function validPlan() {
             mimeType: "image/jpeg",
             dataBase64: JPEG_BYTES.toString("base64")
           }
+        ],
+        attachmentOrder: [
+          "高速入口.jpg",
+          "01-西过境-S1113连接线.jpg",
+          "大酉山隧道.jpg"
         ]
       }
     ],
@@ -119,6 +124,11 @@ test("normalizes a complete plan as dry-run by default", () => {
   assert.equal(plan.confirmToken, "");
   assert.equal(plan.schedules[0].mode, "upsert");
   assert.equal(plan.records[0].attachments[0].mimeType, "image/jpeg");
+  assert.deepEqual(plan.records[0].attachmentOrder, [
+    "高速入口.jpg",
+    "01-西过境-S1113连接线.jpg",
+    "大酉山隧道.jpg"
+  ]);
 });
 
 test("requires a one-time confirm token for live writes", () => {

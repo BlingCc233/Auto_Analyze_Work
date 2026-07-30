@@ -8,6 +8,7 @@ import {
   coordinatesFromOcr,
   groupRoutePhotos,
   inferRouteTimeRange,
+  normalizeRoutePhotos,
   placeAssignment,
   resolvePhotoAssignments,
   routeReadiness,
@@ -334,6 +335,79 @@ test("separates the complete July 27 morning and afternoon patrols from one WeCh
   assert.equal(routeReadiness("west", photos).reviewCount, 0);
 });
 
+test("resolves the July 28 west patrol, removes duplicates and excludes post-route transit", () => {
+  const photos = [
+    {
+      fileName: "微信图片_20260728114245_144_43.jpg",
+      ocrText: "11:09 未授权位置 2026-07-28 西宁南收费站",
+      timeOcrText: "11:09"
+    },
+    {
+      fileName: "微信图片_20260728114249_145_43.jpg",
+      ocrText: "10:58 未授权位置 2026-07-28",
+      timeOcrText: "10:58"
+    },
+    {
+      fileName: "微信图片_20260728114250_146_43.jpg",
+      ocrText: "09:23 2026-07-28 西宁市 S1113宁贵高速 大通 湟源 兰州 防伪TYUA2KKK1BGDN9",
+      timeOcrText: "09:23"
+    },
+    {
+      fileName: "微信图片_20260728114251_147_43.jpg",
+      ocrText: "09:25 2026-07-28 G0611张汶高速 门源 G6 湟源 格尔木 西宁城区 海湖大道 西钢 多巴",
+      timeOcrText: "09:25"
+    },
+    {
+      fileName: "微信图片_20260728114252_148_43.jpg",
+      ocrText: "09:28 2026-07-28 前方隧道2540m 西宁市 青海格桑花生物科技股份有限公司",
+      timeOcrText: "09:28"
+    },
+    {
+      fileName: "微信图片_20260728114254_149_43.jpg",
+      ocrText: "10:01 2026-07-28 西宁市 G6京藏高速 海拔：2384.8米",
+      timeOcrText: "10:01"
+    },
+    {
+      fileName: "微信图片_20260728114255_150_43.jpg",
+      ocrText: "10:02 2026-07-28 西宁市 G6京藏高速 海拔：2389.9米",
+      timeOcrText: "10:02"
+    },
+    {
+      fileName: "微信图片_20260728114256_151_43.jpg",
+      ocrText: "10:28 2026-07-28 西宁市 G0611 大通 门源",
+      timeOcrText: "10:28"
+    },
+    {
+      fileName: "微信图片_20260728114405_152_43.jpg",
+      ocrText: "09:23 2026-07-28 西宁市 S1113宁贵高速 大通 湟源 兰州 防伪TYUA2KKK1BGDN9",
+      timeOcrText: "09:23"
+    }
+  ].map(classifyImage);
+  const resolved = resolvePhotoAssignments(photos);
+  const included = normalizeRoutePhotos("west", resolved);
+
+  assert.deepEqual(
+    included.map((photo) => [photo.time, photo.place, photo.confidence]),
+    [
+      ["09:23", "高速入口", "topology"],
+      ["09:25", "西宁西方向", "topology"],
+      ["09:28", "大酉山隧道", "high"],
+      ["10:01", "西宁西收费站", "high"],
+      ["10:02", "西宁西收费站", "high"],
+      ["10:28", "西过境出口", "topology"]
+    ]
+  );
+  assert.equal(routeReadiness("west", resolved).reviewCount, 0);
+  assert.equal(resolved.find((photo) => photo.captureOrder === 152).confidence, "excluded");
+  assert.match(resolved.find((photo) => photo.captureOrder === 152).reason, /重复照片/);
+  assert.deepEqual(
+    resolved
+      .filter((photo) => [144, 145].includes(photo.captureOrder))
+      .map((photo) => photo.confidence),
+    ["excluded", "excluded"]
+  );
+});
+
 test("keeps a confirmed manual place locked across assignment reruns", () => {
   const classified = classifyImage({
     fileName: "微信图片_20260727152321_139_43.jpg",
@@ -433,16 +507,18 @@ test("accepts a partial western patrol while preserving its coverage warning", (
   ]);
 });
 
-test("marks an unlabelled image between validated route anchors for review instead of inventing a station", () => {
+test("defaults an unlabelled image between validated route anchors to a removable facility survey", () => {
   const photos = resolvePhotoAssignments([
     classifyImage({ fileName: "1.jpg", ocrText: "09:02 大酉山隧道" }),
     classifyImage({ fileName: "2.jpg", ocrText: "09:20 西宁市 G6京藏高速" }),
     classifyImage({ fileName: "3.jpg", ocrText: "09:35 西宁西收费站 G6西向" })
   ]);
   assert.equal(photos[1].routeKey, "west");
-  assert.equal(photos[1].place, "连接/待确认节点");
-  assert.equal(photos[1].confidence, "context");
+  assert.equal(photos[1].place, "路域设施勘察");
+  assert.equal(photos[1].event, "facility-survey");
+  assert.equal(photos[1].confidence, "topology");
   assert.equal(photos[1].include, true);
+  assert.match(photos[1].reason, /手动排除/);
 });
 
 test("gives an exact coordinate cluster priority over a broad road-sign alias", () => {

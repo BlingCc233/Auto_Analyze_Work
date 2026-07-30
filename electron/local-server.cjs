@@ -54,34 +54,19 @@ function localError(code, message, statusCode = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-function businessDate() {
+function businessDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).formatToParts(new Date());
+  }).formatToParts(now);
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-async function preferredBusinessDate(dailyRoot) {
-  const today = businessDate();
-  try {
-    await stat(resolve(dailyRoot, folderFor(today)));
-    return today;
-  } catch {
-    try {
-      const folders = (await readdir(dailyRoot, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory() && /^\d{6}$/.test(entry.name))
-        .map((entry) => entry.name)
-        .sort();
-      const latest = folders.at(-1);
-      return latest ? `20${latest.slice(0, 2)}-${latest.slice(2, 4)}-${latest.slice(4, 6)}` : today;
-    } catch {
-      return today;
-    }
-  }
+async function preferredBusinessDate(_dailyRoot, now = new Date()) {
+  return businessDate(now);
 }
 
 function folderFor(date) {
@@ -407,6 +392,7 @@ async function startLocalServer({
   dailyRoot,
   port = DEFAULT_PORT,
   nativeOcr,
+  now = () => new Date(),
   limits = {}
 }) {
   const distRoot = await resolveDistRoot(resolve(appRoot));
@@ -443,7 +429,7 @@ async function startLocalServer({
 
       if (request.method === "GET" && url.pathname === "/api/today") {
         return sendJson(response, 200, {
-          date: await preferredBusinessDate(patrolRoot)
+          date: await preferredBusinessDate(patrolRoot, now())
         });
       }
 
@@ -527,6 +513,8 @@ module.exports = {
   DEFAULT_PORT,
   MAX_IMAGE_BYTES,
   MAX_OCR_BODY_BYTES,
+  businessDate,
+  preferredBusinessDate,
   resolveNativeOcrRuntimeRoot,
   resolveDistRoot,
   startLocalServer

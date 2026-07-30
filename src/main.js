@@ -66,6 +66,11 @@ const DEFAULT_CREDENTIAL_USER = "李彩燕";
 const ROUTE_KEYS = Object.keys(ROUTES);
 const ROUTE_BADGES = { g6: "G6", west: "G6 西过境", s101: "S101" };
 const PERSONNEL = Object.keys(OFFICIAL_PERSONNEL);
+const PATROL_VEHICLES = ["青A99R18", "青A33W69"];
+const DEFAULT_OFFICERS_BY_VEHICLE = {
+  "青A99R18": ["张景雲"],
+  "青A33W69": ["宁戎"]
+};
 const WEATHER_OPTIONS = ["晴", "多云", "阴", "小雨", "中雨", "大雨", "雪", "雾"];
 const WORKFLOW_STEPS = [
   ["source", "照片准备"],
@@ -98,7 +103,7 @@ function emptyWorkflow() {
 
 const state = {
   date: chinaDate(),
-  dateSynchronized: false,
+  businessDate: "",
   weather: "",
   confirmedCondition: "畅通",
   // 自动登录
@@ -119,14 +124,14 @@ const state = {
   routeProfiles: {
     g6: {
       vehicle: "青A99R18",
-      officers: ["张彩琪", "李彩燕", "黄昇鹏"],
+      officers: ["张景雲"],
       startTime: "08:00",
       endTime: "12:00",
       timeManual: false
     },
     west: {
       vehicle: "青A33W69",
-      officers: ["宁戎", "杨富强"],
+      officers: ["宁戎"],
       startTime: "08:00",
       endTime: "12:00",
       timeManual: false
@@ -1053,14 +1058,16 @@ async function synchronizeBusinessDate() {
     const response = await fetch("/api/today");
     const payload = await response.json();
     if (!response.ok || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) return;
-    if (!state.dateSynchronized) {
+    const firstSynchronization = !state.businessDate;
+    const dayChanged = Boolean(state.businessDate && state.businessDate !== payload.date);
+    state.businessDate = payload.date;
+    if (firstSynchronization || dayChanged) {
       state.date = payload.date;
-      state.dateSynchronized = true;
       render();
       await loadDailyFolder();
     }
   } catch {
-    state.dateSynchronized = true;
+    // Keep the renderer-computed China date when the local date endpoint is unavailable.
   }
 }
 
@@ -1270,7 +1277,7 @@ function routeState(draft) {
 }
 
 function renderOfficerPicker(routeKey, selected) {
-  return `<div class="officer-picker" role="group" aria-label="${escapeHtml(ROUTES[routeKey].code)}巡查人员">
+  return `<div class="officer-picker" data-scroll-key="officers-${routeKey}" role="group" aria-label="${escapeHtml(ROUTES[routeKey].code)}巡查人员">
     ${PERSONNEL.map((name) => {
       const available = Boolean(OFFICIAL_PERSONNEL[name]?.personId);
       const unavailableLabel = state.personnelSynchronized ? "未入系统" : "待同步";
@@ -1301,7 +1308,12 @@ function renderRoutes(drafts) {
       <div class="route-fields">
         <label class="vehicle-field">
           <span>${icon("car-front", 13)}执法车辆</span>
-          <input class="field-control" data-route-field="vehicle" data-route="${routeKey}" value="${escapeHtml(profile.vehicle)}" placeholder="车牌号">
+          <select class="field-control" data-route-field="vehicle" data-route="${routeKey}">
+            <option value="" ${profile.vehicle ? "" : "selected"}>请选择车辆</option>
+            ${PATROL_VEHICLES.map((vehicle) =>
+              `<option value="${escapeHtml(vehicle)}" ${profile.vehicle === vehicle ? "selected" : ""}>${escapeHtml(vehicle)}</option>`
+            ).join("")}
+          </select>
         </label>
         <div class="route-time-fields">
           <label>
@@ -1520,7 +1532,7 @@ function renderFlowInspector() {
 function renderInspector() {
   const photo = selectedPhotoRecord();
   const mode = !photo && state.inspectorMode === "photo" ? "flow" : state.inspectorMode;
-  return `<aside class="inspector-panel">
+  return `<aside class="inspector-panel" data-scroll-key="inspector-panel">
     <div class="inspector-header">
       <div>
         <h2>${mode === "photo" ? "图片核验" : "自动流程"}</h2>
@@ -1536,6 +1548,12 @@ function renderInspector() {
 }
 
 function render() {
+  const scrollPositions = new Map(
+    [...document.querySelectorAll("[data-scroll-key]")].map((element) => [
+      element.dataset.scrollKey,
+      { top: element.scrollTop, left: element.scrollLeft }
+    ])
+  );
   const outputs = generatedOutputs();
   const includedCount = state.photos.filter((photo) => photo.include).length;
   const routeCount = outputs.usable.length;
@@ -1610,7 +1628,7 @@ function render() {
       </div>` : ""}
 
       <main class="workbench">
-        <aside class="task-sidebar">
+        <aside class="task-sidebar" data-scroll-key="task-sidebar">
           <section class="sidebar-section day-section">
             <div class="panel-heading"><div><h2>今日任务</h2><span>日期、天气与路况</span></div>${icon("calendar-days", 18)}</div>
             <label class="field-label">
@@ -1671,6 +1689,12 @@ function render() {
 
   createIcons({ icons: ICONS });
   bind();
+  for (const element of document.querySelectorAll("[data-scroll-key]")) {
+    const position = scrollPositions.get(element.dataset.scrollKey);
+    if (!position) continue;
+    element.scrollTop = position.top;
+    element.scrollLeft = position.left;
+  }
 }
 
 function photoBySourceIndex(sourceIndex) {
@@ -1871,6 +1895,11 @@ function bind() {
       const routeKey = event.target.dataset.route;
       const field = event.target.dataset.routeField;
       state.routeProfiles[routeKey][field] = event.target.value.trim();
+      if (field === "vehicle") {
+        state.routeProfiles[routeKey].officers = [
+          ...(DEFAULT_OFFICERS_BY_VEHICLE[state.routeProfiles[routeKey].vehicle] || [])
+        ];
+      }
       if (field === "startTime" || field === "endTime") {
         state.routeProfiles[routeKey].timeManual = true;
       }
@@ -1992,5 +2021,10 @@ function bind() {
 
 render();
 synchronizeBusinessDate();
+window.addEventListener("focus", () => synchronizeBusinessDate());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) synchronizeBusinessDate();
+});
+window.setInterval(() => synchronizeBusinessDate(), 60_000);
 refreshDesktopStatus();
 loadCredentialUsers();

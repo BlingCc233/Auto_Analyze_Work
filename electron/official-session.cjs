@@ -464,7 +464,14 @@ function normalizeSubmitPlan(input) {
     assertPlainObject(item, label);
     assertKnownKeys(
       item,
-      new Set(["clientRef", "scheduleRef", "mode", "payload", "attachments"]),
+      new Set([
+        "clientRef",
+        "scheduleRef",
+        "mode",
+        "payload",
+        "attachments",
+        "attachmentOrder"
+      ]),
       label
     );
     const payload = normalizePayload("record", item.payload, date);
@@ -479,13 +486,21 @@ function normalizeSubmitPlan(input) {
       min: 0,
       max: MAX_RECORD_ATTACHMENTS
     }).map(normalizeAttachment);
+    const attachmentOrder = assertArray(
+      item.attachmentOrder || [],
+      `${label}.attachmentOrder`,
+      { min: 0, max: MAX_RECORD_ATTACHMENTS }
+    ).map((name, attachmentIndex) =>
+      assertString(name, `${label}.attachmentOrder[${attachmentIndex}]`, { max: 255 })
+    );
     attachmentCount += attachments.length;
     return {
       clientRef: normalizeClientRef(item.clientRef, `${label}.clientRef`),
       scheduleRef: normalizeClientRef(item.scheduleRef, `${label}.scheduleRef`),
       mode,
       payload,
-      attachments
+      attachments,
+      attachmentOrder
     };
   });
   if (attachmentCount > MAX_PLAN_ATTACHMENTS) {

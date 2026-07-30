@@ -87,11 +87,11 @@ const PLACE_RULES = [
   { id: "west-entry", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /生物园|生美园|海湖路.*G6.*入口/, score: 97, attachmentName: "高速入口.jpg" },
   { id: "west-entry-poi", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /万方城/, score: 78, attachmentName: "高速入口.jpg" },
   { id: "west-diverge-s1113", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 1, match: /S1113宁贵高速.*(?:湟源|兰州)|(?:湟源|兰州).{0,40}S1113宁贵高速/, score: 99, attachmentName: "西宁西方向.jpg" },
-  { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|湟源.*格尔木.*门源|西钢.*大通/, score: 91, attachmentName: "西宁西方向.jpg" },
+  { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|湟源.*格尔木.*门源|门源.*湟源.*格尔木|西钢.*大通|西宁城区.*海湖大道.*西钢.*多巴/, score: 98, attachmentName: "西宁西方向.jpg" },
   { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大酉山.*隧道|万佳家博园|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
   { id: "west-tunnel-left", name: "大酉山隧道", semanticPoint: "大酉山隧道左幅", routeKey: "west", order: 5, match: /和泰居/, score: 97, attachmentName: "大酉山隧道.jpg" },
   { id: "west-toll", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /西宁西.*收费|收费站.*G6.*西向|多巴凤凰/, score: 100, attachmentName: "西宁西收费站.jpg" },
-  { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*(?:ETC车辆靠中|海拔2[34]\d{2})|(?:ETC车辆靠中|海拔2[34]\d{2}).*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
+  { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*(?:ETC车辆靠中|海拔[:：]?2[34]\d{2})|(?:ETC车辆靠中|海拔[:：]?2[34]\d{2}).*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
   { id: "west-steel", name: "西钢出口", semanticPoint: "西钢出口", routeKey: "west", order: 5, match: /西钢.*(?:出口|入口)/, score: 96, attachmentName: "西钢出口.jpg" },
   { id: "west-exit", name: "西过境出口", semanticPoint: "西过境段东端出口", routeKey: "west", order: 6, match: /西过境.*出口|海湖路.*出口|青海建国物流/, score: 99, attachmentName: "西过境出口.jpg" },
 
@@ -426,6 +426,29 @@ function assignContextBatches(photos, gapMinutes = 75) {
   return result;
 }
 
+function markExactOcrDuplicates(photos) {
+  const seen = new Map();
+  return photos.map((photo) => {
+    const text = String(photo.ocrText || "").replace(/\s+/g, "");
+    if (text.length < 40) return photo;
+    const key = `${photo.sourceSeries || ""}\0${photo.time || ""}\0${text}`;
+    const original = seen.get(key);
+    if (!original) {
+      seen.set(key, photo);
+      return photo;
+    }
+    return {
+      ...photo,
+      duplicateOf: original.originalName,
+      routeKey: "",
+      routeOptions: [],
+      include: false,
+      confidence: "excluded",
+      reason: `与${original.originalName}的完整OCR、水印时间和防伪信息完全一致，按重复照片自动排除。`
+    };
+  });
+}
+
 export function classifyImage({ fileName, ocrText = "", timeOcrText = "" }) {
   const { source, candidate: ruleCandidate, candidates: ruleCandidates } = chooseCandidate(fileName, ocrText);
   const historical = matchHistoricalKnowledge(ocrText);
@@ -564,6 +587,7 @@ function normalizedNameBase(photo) {
   if (photo.nameBase) return photo.nameBase;
   if (photo.event === "construction") return "施工监管";
   if (photo.event === "overload") return "治超";
+  if (photo.event === "facility-survey") return "路域设施勘察";
   const aliases = {
     "海东收费站入口": "海东主线收费站",
     "海东收费站出口": "海东主线收费站",
@@ -892,7 +916,8 @@ function setTopologyPoint(photo, {
   place,
   semanticPoint,
   sequence,
-  name
+  name,
+  event = photo.event
 }) {
   Object.assign(photo, {
     pointId,
@@ -902,6 +927,7 @@ function setTopologyPoint(photo, {
     nameBase: name || place,
     standardName: `${name || place}.jpg`,
     proposedName: `${name || place}.jpg`,
+    event,
     shared: false,
     include: true,
     confidence: "topology",
@@ -920,15 +946,31 @@ function refineWestTopology(photos) {
   }
 
   for (const [seriesKey, entries] of series) {
-    entries.sort((left, right) => {
-      if (Number.isFinite(left.captureOrder) && Number.isFinite(right.captureOrder)) {
-        return left.captureOrder - right.captureOrder;
-      }
-      return sortByTime(left, right) || left.sourceIndex - right.sourceIndex;
-    });
+    entries.sort(compareContextPhotos);
     const firstTunnelIndex = entries.findIndex((photo) =>
       photo.pointId === "west-tunnel-right" || photo.place === "大酉山隧道"
     );
+    if (firstTunnelIndex > 0) {
+      const beforeTunnel = entries.slice(0, firstTunnelIndex);
+      const hasConfirmedEntry = beforeTunnel.some((photo) => photo.place === "高速入口");
+      const directionCandidates = beforeTunnel.filter((photo) => photo.place === "西宁西方向");
+      if (!hasConfirmedEntry && directionCandidates.length > 0) {
+        setTopologyPoint(directionCandidates[0], {
+          pointId: "west-entry",
+          place: "高速入口",
+          semanticPoint: "西过境段高速入口（同仁路口/朝阳互通）",
+          sequence: 1
+        });
+      }
+      if (!hasConfirmedEntry && directionCandidates.length > 1) {
+        setTopologyPoint(directionCandidates[1], {
+          pointId: "west-diverge",
+          place: "西宁西方向",
+          semanticPoint: "朝阳互通西过境方向分流",
+          sequence: 2
+        });
+      }
+    }
     if (firstTunnelIndex > 1) {
       const entryCandidates = entries.slice(0, firstTunnelIndex).filter((photo) =>
         ["高速入口", "西宁西方向"].includes(photo.place)
@@ -963,7 +1005,7 @@ function refineWestTopology(photos) {
     }
     const firstConfirmedTollIndex = entries.findIndex((photo, index) =>
       index > firstTunnelIndex
-      && photo.pointId === "west-toll"
+      && photo.pointId?.startsWith("west-toll")
       && photo.confidence === "high"
     );
 
@@ -987,7 +1029,15 @@ function refineWestTopology(photos) {
       for (let index = firstConfirmedTollIndex + 1; index < entries.length; index += 1) {
         const photo = entries[index];
         const elapsed = minutes(photo.time) - turnaroundTime;
-        if (photo.pointId === "west-toll" && Number.isFinite(elapsed) && elapsed >= 10) {
+        const previous = entries[index - 1];
+        const previousGap = minutes(photo.time) - minutes(previous?.time);
+        if (
+          photo.pointId?.startsWith("west-toll")
+          && Number.isFinite(elapsed)
+          && elapsed >= 16
+          && Number.isFinite(previousGap)
+          && previousGap >= 16
+        ) {
           setTopologyPoint(photo, {
             pointId: "west-tunnel-left",
             place: "大酉山隧道",
@@ -1000,6 +1050,20 @@ function refineWestTopology(photos) {
     }
 
     const returnTunnelIndex = entries.findIndex((photo) => photo.pointId === "west-tunnel-left");
+    const tollIndex = entries.findIndex((photo) => photo.pointId?.startsWith("west-toll"));
+    if (tollIndex >= 0) {
+      const exit = entries.slice(tollIndex + 1).find((photo) =>
+        /(?:G?0?611|6061).*(?:大通|门源)|(?:大通|门源).*(?:G?0?611|6061)/.test(normalizeText(photo.ocrText))
+      );
+      if (exit) {
+        setTopologyPoint(exit, {
+          pointId: "west-exit",
+          place: "西过境出口",
+          semanticPoint: "西过境段东端出口",
+          sequence: 6
+        });
+      }
+    }
     if (seriesKey !== "unsequenced" && returnTunnelIndex >= 0) {
       const last = entries.at(-1);
       const source = normalizeText(last.ocrText);
@@ -1020,9 +1084,106 @@ function refineWestTopology(photos) {
   return result;
 }
 
+function refineContextSurveyPoints(photos) {
+  const result = photos.map((photo) => ({ ...photo }));
+  const groups = new Map();
+  for (const photo of result) {
+    if (!photo.routeKey || photo.include === false) continue;
+    const key = `${photo.routeKey}\0${photo.contextBatch || photo.sourceSeries || "unsequenced"}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(photo);
+  }
+
+  for (const entries of groups.values()) {
+    entries.sort(compareContextPhotos);
+    for (let index = 1; index < entries.length - 1; index += 1) {
+      const photo = entries[index];
+      if (
+        photo.manualAssignment
+        || photo.transit
+        || photo.pointId
+        || !["连接/待确认节点", "待确认地点"].includes(photo.place)
+      ) continue;
+      const previous = [...entries.slice(0, index)].reverse().find((item) =>
+        item.pointId && item.confidence !== "context"
+      );
+      const next = entries.slice(index + 1).find((item) =>
+        item.pointId && item.confidence !== "context"
+      );
+      const at = minutes(photo.time);
+      const previousAt = minutes(previous?.time);
+      const nextAt = minutes(next?.time);
+      if (
+        !previous
+        || !next
+        || !Number.isFinite(at)
+        || !Number.isFinite(previousAt)
+        || !Number.isFinite(nextAt)
+        || at < previousAt
+        || at > nextAt
+        || nextAt - previousAt > 75
+      ) continue;
+      const previousSequence = Number(previous.sequence);
+      const nextSequence = Number(next.sequence);
+      const sequence = Number.isFinite(previousSequence) && Number.isFinite(nextSequence)
+        ? previousSequence
+          + (nextSequence - previousSequence)
+          * ((at - previousAt) / Math.max(1, nextAt - previousAt))
+        : Number.isFinite(previousSequence) ? previousSequence : nextSequence;
+      setTopologyPoint(photo, {
+        pointId: `${photo.routeKey}-facility-survey`,
+        place: "路域设施勘察",
+        semanticPoint: "相邻巡查点位间桥下空间、路域环境及沿线设施勘察",
+        sequence,
+        event: "facility-survey"
+      });
+      photo.reason = `拍摄时间位于${previous.place}与${next.place}两个已确认点位之间，按同线路拓扑默认归入路域设施勘察；如非巡查照片可手动排除。`;
+    }
+  }
+  return result;
+}
+
+function excludePostRouteTransit(photos) {
+  const result = photos.map((photo) => ({ ...photo }));
+  const groups = new Map();
+  for (const photo of result) {
+    const key = photo.contextBatch || photo.sourceSeries;
+    if (!key || photo.duplicateOf) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(photo);
+  }
+  for (const entries of groups.values()) {
+    entries.sort(compareContextPhotos);
+    const exitIndex = entries.findIndex((photo) =>
+      photo.routeKey === "west" && photo.pointId === "west-exit"
+    );
+    if (exitIndex < 0) continue;
+    const exitAt = minutes(entries[exitIndex].time);
+    for (const photo of entries.slice(exitIndex + 1)) {
+      const elapsed = minutes(photo.time) - exitAt;
+      if (
+        !Number.isFinite(elapsed)
+        || elapsed < 15
+        || photo.pointId
+        || (photo.evidence?.length ?? 0) > 0
+      ) continue;
+      Object.assign(photo, {
+        routeKey: "",
+        routeOptions: [],
+        include: false,
+        confidence: "excluded",
+        reason: "已越过西过境东端出口，且后续照片没有命中三条管辖线路点位，按返程照片自动排除。"
+      });
+    }
+  }
+  return result;
+}
+
 export function resolvePhotoAssignments(photos) {
   let classified = assignContextBatches(
-    photos.map((photo, sourceIndex) => ({ sourceIndex, ...photo }))
+    markExactOcrDuplicates(
+      photos.map((photo, sourceIndex) => ({ sourceIndex, ...photo }))
+    )
   );
   const globalContext = routeContextScores(classified);
   const contexts = new Map();
@@ -1038,6 +1199,7 @@ export function resolvePhotoAssignments(photos) {
   }
 
   classified = classified.map((photo, index) => {
+    if (photo.duplicateOf) return photo;
     if (photo.manualAssignment) {
       return {
         ...photo,
@@ -1140,7 +1302,15 @@ export function resolvePhotoAssignments(photos) {
     };
   });
 
-  return assignPatrolGroups(repairContextTimes(refineWestTopology(classified)));
+  return assignPatrolGroups(
+    refineContextSurveyPoints(
+      repairContextTimes(
+        excludePostRouteTransit(
+          refineWestTopology(classified)
+        )
+      )
+    )
+  );
 }
 
 export function groupRoutePhotos(photos) {
@@ -1197,6 +1367,7 @@ function cnTime(value) {
 function eventLine(photo) {
   if (photo.event === "construction") return `${cnTime(photo.time)}巡查至${photo.place}，对现场作业开展施工监管，作业安全措施及通行组织以现场核验结果为准。`;
   if (photo.event === "overload") return `${cnTime(photo.time)}巡查至${photo.place}，开展超限治理相关巡查，检查情况以现场登记为准。`;
+  if (photo.event === "facility-survey") return `${cnTime(photo.time)}对沿线路域环境、桥下空间及公路附属设施开展现场勘察，未发现异常情况。`;
   if (photo.routeKey === "g6" && photo.place === "海东收费站入口") {
     return `${cnTime(photo.time)}巡查至海东主线收费站 K1779+800m，收费站交通秩序正常，无堵车压车现象。`;
   }

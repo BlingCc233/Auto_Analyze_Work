@@ -5,6 +5,7 @@ const { request } = require("node:http");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const {
+  businessDate,
   resolveNativeOcrRuntimeRoot,
   startLocalServer
 } = require("../electron/local-server.cjs");
@@ -92,6 +93,28 @@ test("uses the external Resources directory as the packaged OCR runtime root", (
     resolveNativeOcrRuntimeRoot("/workspace/patrol", resources),
     "/workspace/patrol"
   );
+});
+
+test("uses the current China business date instead of the latest historical folder", async () => {
+  const fixture = await createFixture();
+  try {
+    await mkdir(join(fixture.dailyRoot, "260727"));
+    assert.equal(
+      businessDate(new Date("2026-07-27T16:30:00.000Z")),
+      "2026-07-28"
+    );
+    await withServer({
+      appRoot: fixture.appRoot,
+      dailyRoot: fixture.dailyRoot,
+      now: () => new Date("2026-07-27T16:30:00.000Z")
+    }, async ({ url }) => {
+      const response = await rawRequest(`${url}/api/today`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(JSON.parse(response.body), { date: "2026-07-28" });
+    });
+  } finally {
+    await fixture.cleanup();
+  }
 });
 
 test("serves built assets and uses index.html only for SPA navigation", async () => {
