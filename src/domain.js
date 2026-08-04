@@ -91,8 +91,8 @@ const PLACE_RULES = [
   { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大酉山.*隧道|万佳家博园|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
   { id: "west-tunnel-left", name: "大酉山隧道", semanticPoint: "大酉山隧道左幅", routeKey: "west", order: 5, match: /和泰居/, score: 97, attachmentName: "大酉山隧道.jpg" },
   { id: "west-toll", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /西宁西.*收费|收费站.*G6.*西向|多巴凤凰/, score: 100, attachmentName: "西宁西收费站.jpg" },
-  { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*(?:ETC车辆靠中|海拔[:：]?2[34]\d{2})|(?:ETC车辆靠中|海拔[:：]?2[34]\d{2}).*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
-  { id: "west-steel", name: "西钢出口", semanticPoint: "西钢出口", routeKey: "west", order: 5, match: /西钢.*(?:出口|入口)/, score: 96, attachmentName: "西钢出口.jpg" },
+  { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*ETC车辆靠中|ETC车辆靠中.*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
+  { id: "west-steel", name: "西钢出口", semanticPoint: "西钢出口", routeKey: "west", order: 5, match: /西宁特殊钢|西钢(?:.*(?:出口|入口))?/, score: 96, attachmentName: "西钢出口.jpg" },
   { id: "west-exit", name: "西过境出口", semanticPoint: "西过境段东端出口", routeKey: "west", order: 6, match: /西过境.*出口|海湖路.*出口|青海建国物流/, score: 99, attachmentName: "西过境出口.jpg" },
 
   { id: "s101-entry", name: "互助匝道入口", semanticPoint: "S101韵家口端入口匝道", routeKey: "s101", order: 1, match: /互助匝道.*入口|进入S101/, score: 99, attachmentName: "互助匝道入口.jpg" },
@@ -155,10 +155,11 @@ export function timeFromOcr(text = "") {
     if (hour < 6 && String(hourRaw).length === 1 && hour + 10 <= 15) hour += 10;
     if (hour > 23) return;
     const distance = dateIndex === -1 ? index : Math.abs(index - dateIndex);
+    const watermarkPrefixBonus = dateIndex >= 0 && index < dateIndex ? 42 : 0;
     const roadSignPenalty = /(?:7|07)\s*[:.]\s*00\s*[-—]\s*(?:21|22)\s*[:.]\s*00/.test(raw) ? 80 : 0;
     candidates.push({
       value: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
-      score: quality - Math.min(35, distance / 12) - roadSignPenalty,
+      score: quality + watermarkPrefixBonus - Math.min(35, distance / 12) - roadSignPenalty,
       index
     });
   };
@@ -184,6 +185,52 @@ export function timeFromOcr(text = "") {
   return candidates[0].value;
 }
 
+function watermarkPrefixTime(text = "") {
+  const source = String(text)
+    .replace(/[Oo]/g, "0")
+    .replace(/[Il|]/g, "1")
+    .replace(/[：﹕]/g, ":");
+  const lines = source.split(/\r?\n/).map((line) => line.trim());
+  const dateLineIndex = lines.findIndex((line) =>
+    /20\d{2}[-=./:]\d{1,2}[-=./:]\d{1,2}/.test(line)
+  );
+  if (dateLineIndex <= 0) return "";
+
+  const candidates = [];
+  const add = (hourRaw, minuteRaw, lineIndex, quality) => {
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    if (
+      !Number.isInteger(hour)
+      || !Number.isInteger(minute)
+      || hour > 23
+      || minute > 59
+    ) return;
+    candidates.push({
+      value: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+      score: quality + lineIndex
+    });
+  };
+
+  lines.slice(0, dateLineIndex).forEach((line, lineIndex) => {
+    let match = line.match(/^([0-2]?\d)\s*[:.,·-]\s*([0-5]\d)(?:\D.*)?$/);
+    if (match) {
+      add(match[1], match[2], lineIndex, 120);
+      return;
+    }
+    match = line.match(/^([0-2]\d)([0-5]\d)$/);
+    if (match) {
+      add(match[1], match[2], lineIndex, 116);
+      return;
+    }
+    match = line.match(/^(\d)([0-5]\d)$/);
+    if (match) add(match[1], match[2], lineIndex, 108);
+  });
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.value || "";
+}
+
 export function dateFromOcr(text = "") {
   const source = String(text).replace(/[=./:]/g, "-");
   const match = source.match(/(20\d{2})-(\d{1,2})-(\d{1,2})/)
@@ -197,6 +244,9 @@ export function dateFromOcr(text = "") {
 }
 
 export function timeFromOcrEvidence(ocrText = "", timeOcrText = "") {
+  const watermarkTime = watermarkPrefixTime(ocrText);
+  if (watermarkTime) return watermarkTime;
+
   const compact = String(timeOcrText).replace(/\D/g, "");
   const firstLineHour = String(ocrText).trimStart().match(/^([0-2])(?:\D|$)/)?.[1];
   if (
@@ -952,7 +1002,40 @@ function refineWestTopology(photos) {
     );
     if (firstTunnelIndex > 0) {
       const beforeTunnel = entries.slice(0, firstTunnelIndex);
-      const hasConfirmedEntry = beforeTunnel.some((photo) => photo.place === "高速入口");
+      let hasConfirmedEntry = beforeTunnel.some((photo) => photo.place === "高速入口");
+      if (!hasConfirmedEntry) {
+        const entry = beforeTunnel.find((photo) =>
+          photo.shared
+          && photo.pointId === "shared-connector"
+          && /S1113宁贵高速/.test(normalizeText(photo.ocrText))
+        );
+        if (entry) {
+          setTopologyPoint(entry, {
+            pointId: "west-entry",
+            place: "高速入口",
+            semanticPoint: "西过境段高速入口（S1113宁贵高速连接段）",
+            sequence: 1
+          });
+          entry.reason = "该图位于G0611/G6分流及大酉山隧道之前，按西过境巡查起点自动确认为高速入口。";
+          hasConfirmedEntry = true;
+        }
+      }
+      const entryIndex = beforeTunnel.findIndex((photo) => photo.place === "高速入口");
+      const diverge = beforeTunnel.find((photo, index) =>
+        index > entryIndex
+        && photo.shared
+        && /G0611张汶高速/.test(normalizeText(photo.ocrText))
+        && /G6|湟源|格尔木/.test(normalizeText(photo.ocrText))
+      );
+      if (diverge && diverge.place !== "西宁西方向") {
+        setTopologyPoint(diverge, {
+          pointId: "west-diverge",
+          place: "西宁西方向",
+          semanticPoint: "朝阳互通西过境方向分流",
+          sequence: 2
+        });
+        diverge.reason = "该图位于高速入口与大酉山隧道之间，且出现G0611/G6及湟源方向标志，自动确认为西宁西方向分流点。";
+      }
       const directionCandidates = beforeTunnel.filter((photo) => photo.place === "西宁西方向");
       if (!hasConfirmedEntry && directionCandidates.length > 0) {
         setTopologyPoint(directionCandidates[0], {
@@ -1003,11 +1086,34 @@ function refineWestTopology(photos) {
         });
       }
     }
-    const firstConfirmedTollIndex = entries.findIndex((photo, index) =>
+    let firstConfirmedTollIndex = entries.findIndex((photo, index) =>
       index > firstTunnelIndex
       && photo.pointId?.startsWith("west-toll")
       && photo.confidence === "high"
     );
+    if (firstConfirmedTollIndex < 0 && firstTunnelIndex >= 0) {
+      for (let index = firstTunnelIndex + 1; index < entries.length - 1; index += 1) {
+        const first = entries[index];
+        const second = entries[index + 1];
+        const gap = minutes(second.time) - minutes(first.time);
+        const bothGenericG6 = [first, second].every((photo) =>
+          ["连接/待确认节点", "待确认地点"].includes(photo.place)
+          && /G6京藏高速/.test(normalizeText(photo.ocrText))
+        );
+        if (!bothGenericG6 || !Number.isFinite(gap) || gap < 0 || gap > 5) continue;
+        for (const photo of [first, second]) {
+          setTopologyPoint(photo, {
+            pointId: "west-toll",
+            place: "西宁西收费站",
+            semanticPoint: "西宁西收费站",
+            sequence: 4
+          });
+          photo.reason = "同一序列在大酉山隧道后连续拍摄两张G6收费站区域照片，结合后续返程方向自动确认。";
+        }
+        firstConfirmedTollIndex = index;
+        break;
+      }
+    }
 
     if (
       seriesKey !== "unsequenced"
@@ -1032,7 +1138,13 @@ function refineWestTopology(photos) {
         const previous = entries[index - 1];
         const previousGap = minutes(photo.time) - minutes(previous?.time);
         if (
-          photo.pointId?.startsWith("west-toll")
+          (
+            photo.pointId?.startsWith("west-toll")
+            || (
+              ["连接/待确认节点", "待确认地点"].includes(photo.place)
+              && /G6京藏高速/.test(normalizeText(photo.ocrText))
+            )
+          )
           && Number.isFinite(elapsed)
           && elapsed >= 16
           && Number.isFinite(previousGap)
@@ -1062,6 +1174,28 @@ function refineWestTopology(photos) {
           semanticPoint: "西过境段东端出口",
           sequence: 6
         });
+      }
+    }
+    if (seriesKey !== "unsequenced" && returnTunnelIndex >= 0) {
+      const returnTunnel = entries[returnTunnelIndex];
+      const exit = entries.slice(returnTunnelIndex + 1).find((photo) => {
+        const elapsed = minutes(photo.time) - minutes(returnTunnel.time);
+        const source = normalizeText(photo.ocrText);
+        return Number.isFinite(elapsed)
+          && elapsed >= 0
+          && elapsed <= 25
+          && (photo.shared || ["连接段", "连接/待确认节点"].includes(photo.place))
+          && /S1113宁贵高速/.test(source)
+          && /昆仑大道|西塔高速|胜利路|城区/.test(source);
+      });
+      if (exit) {
+        setTopologyPoint(exit, {
+          pointId: "west-exit",
+          place: "西过境出口",
+          semanticPoint: "驶出西过境管辖路段返回大队",
+          sequence: 6
+        });
+        exit.reason = "该图位于返程大酉山隧道之后，水印及路牌显示S1113宁贵高速城区出口方向，自动确认为驶离管辖路段返回大队。";
       }
     }
     if (seriesKey !== "unsequenced" && returnTunnelIndex >= 0) {
@@ -1390,8 +1524,9 @@ function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondit
     lines.push(`${cnTime(first.time || startTime)}进入管辖路段G6京藏高速公路西过境段${route.start}-${route.end}（西宁往湟源方向）${entryContext}开展公路巡查；`);
   }
   let tollCount = 0;
+  let exitedRoute = false;
   for (const [index, photo] of photos.entries()) {
-    if (index === 0 && photo.place === "西宁西方向") continue;
+    if (index === 0 && ["高速入口", "西宁西方向"].includes(photo.place)) continue;
     if (photo.place === "大酉山隧道") {
       const direction = photos.filter((item) => item.place === "大酉山隧道").indexOf(photo) === 0 ? "右幅" : "左幅";
       lines.push(`${cnTime(photo.time)}通过大酉山隧道（${direction}），隧道通风、照明设施运行正常，路面无障碍物、无滞留车辆，通行正常。`);
@@ -1404,11 +1539,16 @@ function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondit
           ? `${cnTime(photo.time)}到达西宁西收费站，收费站通行秩序正常，无堵车压车现象。`
           : `${cnTime(photo.time)}从西宁西收费站调头，对G6京藏高速公路西过境段${route.end}-${route.start}（湟源往西宁方向）继续巡查；`);
       }
+    } else if (photo.place === "西过境出口") {
+      exitedRoute = true;
+      lines.push(`${cnTime(photo.time)}从西过境出口驶离管辖路段，返回大队；`);
     } else if (photo.place !== "连接/待确认节点") {
       lines.push(eventLine(photo));
     }
   }
-  lines.push(`${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
+  lines.push(exitedRoute
+    ? `${cnTime(endTime)}返回大队，巡查结束。`
+    : `${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
   lines.push(standardConclusion(route, confirmedCondition));
   return lines.join("\n");
 }

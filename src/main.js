@@ -1080,6 +1080,12 @@ async function refreshDesktopStatus() {
   try {
     state.desktopStatus = await callDesktop("status");
     if (state.desktopStatus.authenticated && state.desktopStatus.serviceReady) {
+      if (
+        state.desktopStatus.username
+        && state.credentialUsers.includes(state.desktopStatus.username)
+      ) {
+        state.selectedCredentialUser = state.desktopStatus.username;
+      }
       await synchronizeOfficialPersonnel();
     }
   } catch (error) {
@@ -1095,7 +1101,12 @@ async function loadCredentialUsers() {
     const result = await method();
     if (result?.ok && Array.isArray(result.users)) {
       state.credentialUsers = result.users.map((u) => u.username).filter(Boolean);
-      if (state.credentialUsers.length > 0 && !state.selectedCredentialUser) {
+      if (
+        state.desktopStatus?.username
+        && state.credentialUsers.includes(state.desktopStatus.username)
+      ) {
+        state.selectedCredentialUser = state.desktopStatus.username;
+      } else if (state.credentialUsers.length > 0 && !state.selectedCredentialUser) {
         state.selectedCredentialUser = state.credentialUsers.includes(DEFAULT_CREDENTIAL_USER)
           ? DEFAULT_CREDENTIAL_USER
           : state.credentialUsers[0];
@@ -1115,8 +1126,11 @@ async function autoLogin() {
     const result = await callDesktop("autoLogin", state.selectedCredentialUser);
     state.desktopStatus = result;
     if (result.authenticated && result.serviceReady) {
+      if (result.username && state.credentialUsers.includes(result.username)) {
+        state.selectedCredentialUser = result.username;
+      }
       await synchronizeOfficialPersonnel();
-      addActivity(`已自动登录为 ${state.selectedCredentialUser}`, "success");
+      addActivity(`已自动登录为 ${result.username || state.selectedCredentialUser}`, "success");
     } else {
       state.autoLoginError = "登录未完全成功，请重试或手动登录";
       addActivity(state.autoLoginError, "warn");
@@ -1162,7 +1176,11 @@ function statusClass() {
 
 function statusLabel() {
   if (!hasDesktopBridge()) return "自动化服务未连接";
-  if (state.desktopStatus?.authenticated && state.desktopStatus?.serviceReady) return "官方系统已登录";
+  if (state.desktopStatus?.authenticated && state.desktopStatus?.serviceReady) {
+    return state.desktopStatus.username
+      ? `${state.desktopStatus.username} 已登录`
+      : "官方系统已登录（账号待确认）";
+  }
   return "官方系统未登录";
 }
 
@@ -1838,9 +1856,18 @@ function bind() {
   });
 
   // 自动登录：用户选择下拉
-  $("#credential-select")?.addEventListener("change", (event) => {
+  $("#credential-select")?.addEventListener("change", async (event) => {
+    const previousUsername = state.desktopStatus?.username || "";
     state.selectedCredentialUser = event.target.value;
     render();
+    if (
+      state.desktopStatus?.authenticated
+      && state.desktopStatus?.serviceReady
+      && previousUsername !== state.selectedCredentialUser
+    ) {
+      addActivity(`正在切换登录账号：${previousUsername || "当前账号"} → ${state.selectedCredentialUser}`);
+      await autoLogin();
+    }
   });
 
   // 自动登录：一键登录按钮

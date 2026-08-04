@@ -168,6 +168,73 @@ test("combines an independently cropped clock with the full watermark hour", () 
   );
 });
 
+test("prefers a valid watermark clock before the date over a bad time crop", () => {
+  assert.equal(
+    timeFromOcrEvidence(
+      "09.21\n2026-08-04\n西宁市•鲸油能源加油加气站\nETC车辆靠中",
+      "05:45"
+    ),
+    "09:21"
+  );
+});
+
+test("reads compact watermark time before the date instead of later road text", () => {
+  const text = [
+    "1109",
+    "2026-08-04",
+    "星期二 晴19°C",
+    "西宁市™S1113宁贵高速",
+    "0.08-2191"
+  ].join("\n");
+  assert.equal(timeFromOcr(text), "11:09");
+  assert.equal(timeFromOcrEvidence(text, ""), "11:09");
+});
+
+test("uses the complete clock line when OCR emits a stray hour above it", () => {
+  assert.equal(
+    timeFromOcrEvidence("09\n09:08\n2026=08-04\n西宁市•西宁特殊钢股份有限公司", ""),
+    "09:08"
+  );
+});
+
+test("resolves the 2026-08-04 western patrol from watermark evidence and topology", () => {
+  const samples = [
+    ["微信图片_20260804113749_155_43.jpg", "08:57\n2026-08-04\n西宁市：S1113宁贵高速", "08:57"],
+    ["微信图片_20260804113750_156_43.jpg", "08:59\n2026-08-04\n西宁市•G0611张汶高速\nG6\n湟源 格尔木", ""],
+    ["微信图片_20260804113751_157_43.jpg", "09.02\n2026¥08 04\n西宁市：公铁联运钢材市场\n大酉山隧道", ""],
+    ["微信图片_20260804113752_158_43.jpg", "09\n09:08\n2026=08-04\n西宁市•西宁特殊钢股份有限公司\n西钢", ""],
+    ["微信图片_20260804113753_159_43.jpg", "09.21\n2026-08-04\n西宁市•鲸油能源加油加气站\nG6京藏高速\nETC车辆靠中", "05:45"],
+    ["微信图片_20260804113754_160_43.jpg", "11:01\n2026-08-04\n西宁市•G6京藏高速\n海拔：2369.5米", "11:01"],
+    ["微信图片_20260804113755_161_43.jpg", "1109\n2026-08-04\n西宁市™S1113宁贵高速\n西昆仑大道\n西塔高速\n0.08-2191", ""]
+  ];
+  const resolved = resolvePhotoAssignments(samples.map(([fileName, ocrText, timeOcrText]) =>
+    classifyImage({ fileName, ocrText, timeOcrText })
+  ));
+
+  assert.deepEqual(resolved.map(({ time, place, routeKey }) => ({ time, place, routeKey })), [
+    { time: "08:57", place: "高速入口", routeKey: "west" },
+    { time: "08:59", place: "西宁西方向", routeKey: "west" },
+    { time: "09:02", place: "大酉山隧道", routeKey: "west" },
+    { time: "09:08", place: "西钢出口", routeKey: "west" },
+    { time: "09:21", place: "西宁西收费站", routeKey: "west" },
+    { time: "11:01", place: "大酉山隧道", routeKey: "west" },
+    { time: "11:09", place: "西过境出口", routeKey: "west" }
+  ]);
+  assert.equal(resolved.filter((photo) => ["review", "context"].includes(photo.confidence)).length, 0);
+  const draft = buildDraft({
+    date: "2026-08-04",
+    routeKey: "west",
+    vehicle: "青A33W69",
+    officers: ["宁戎"],
+    startTime: "08:52",
+    endTime: "11:14",
+    photos: resolved
+  });
+  assert.match(draft.narrative, /08时57分进入管辖路段/);
+  assert.match(draft.narrative, /11时09分从西过境出口驶离管辖路段，返回大队/);
+  assert.doesNotMatch(draft.narrative, /巡查至连接段/);
+});
+
 test("infers a route record window from the first and last included photos", () => {
   assert.deepEqual(inferRouteTimeRange("g6", [
     { routeKey: "g6", include: true, time: "08:57" },
@@ -392,8 +459,8 @@ test("resolves the July 28 west patrol, removes duplicates and excludes post-rou
       ["09:23", "高速入口", "topology"],
       ["09:25", "西宁西方向", "topology"],
       ["09:28", "大酉山隧道", "high"],
-      ["10:01", "西宁西收费站", "high"],
-      ["10:02", "西宁西收费站", "high"],
+      ["10:01", "西宁西收费站", "topology"],
+      ["10:02", "西宁西收费站", "topology"],
       ["10:28", "西过境出口", "topology"]
     ]
   );

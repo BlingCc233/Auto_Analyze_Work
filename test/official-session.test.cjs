@@ -442,6 +442,86 @@ test("submits login after CAPTCHA and returns only API-verified authentication",
   assert.equal(result.serviceReady, true);
 });
 
+test("status reports the verified account selected for the authenticated session", async () => {
+  class UnusedWindow {}
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  official.window = {
+    isDestroyed: () => false,
+    webContents: {
+      getURL: () => "http://110.167.233.70:8084/#/dutyRecord",
+      executeJavaScript: async () => true
+    }
+  };
+  official.pendingUsername = "李彩燕";
+  official._executePage = async () => ({
+    authenticated: true,
+    serviceReady: true
+  });
+
+  const first = await official.status({ createWindow: false });
+  const second = await official.status({ createWindow: false });
+  assert.equal(first.username, "李彩燕");
+  assert.equal(second.username, "李彩燕");
+  assert.equal(official.pendingUsername, "");
+});
+
+test("status restores the authenticated username persisted in the official partition", async () => {
+  class UnusedWindow {}
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  official.window = {
+    isDestroyed: () => false,
+    webContents: {
+      getURL: () => "http://110.167.233.70:8084/#/dutyRecord"
+    }
+  };
+  official._executePage = async () => ({
+    authenticated: true,
+    serviceReady: true,
+    username: "宁戎"
+  });
+
+  const result = await official.status({ createWindow: false });
+  assert.equal(result.username, "宁戎");
+  assert.equal(official.authenticatedUsername, "宁戎");
+});
+
+test("autoLogin switches an authenticated session when another account is selected", async () => {
+  class StopAfterLogout {
+    constructor() {
+      throw Object.assign(new Error("stop after verified logout"), { code: "TEST_STOP" });
+    }
+  }
+  const official = new OfficialSession({
+    BrowserWindow: StopAfterLogout,
+    logger: { log() {}, error() {} }
+  });
+  official.status = async () => ({
+    ok: true,
+    authenticated: true,
+    serviceReady: true,
+    loginRequired: false,
+    username: "宁戎"
+  });
+  let logoutCalls = 0;
+  official.logout = async () => {
+    logoutCalls += 1;
+    return { ok: true, authenticated: false, serviceReady: false };
+  };
+
+  await assert.rejects(
+    official.autoLogin("李彩燕", "secret"),
+    (error) => error.code === "TEST_STOP"
+  );
+  assert.equal(logoutCalls, 1);
+  assert.equal(official.pendingUsername, "李彩燕");
+});
+
 test("logout revokes the official session, clears token cookies and verifies signed-out state", async () => {
   class UnusedWindow {}
   const removedCookies = [];
@@ -497,6 +577,7 @@ test("logout revokes the official session, clears token cookies and verifies sig
     return { code: 200 };
   };
   official._waitForPageReady = async () => {};
+  official.authenticatedUsername = "李彩燕";
 
   const result = await official.logout();
   assert.equal(result.authenticated, false);
@@ -504,6 +585,7 @@ test("logout revokes the official session, clears token cookies and verifies sig
   assert.equal(result.remoteLogoutAccepted, true);
   assert.equal(navigatedTo, "http://110.167.233.70:8084/#/login");
   assert.deepEqual(removedCookies, ["TokenKey", "TokenKey_expired"]);
+  assert.equal(official.authenticatedUsername, "");
 });
 
 test("dry-run performs preflight without invoking any write request", async () => {

@@ -1133,6 +1133,7 @@ try{
   if(input.type==="status"){
     let authenticated=false;
     let responseCode="";
+    let username="";
     if(hasSession()){
       try{
         const response=await request({
@@ -1145,7 +1146,10 @@ try{
         authenticated=responseCode==="200";
       }catch(_){}
     }
-    return{ok:true,value:{serviceReady:true,authenticated,responseCode}};
+    if(authenticated){
+      try{username=String(window.localStorage.getItem("_qh_patrol_authenticated_username")||"").trim();}catch(_){}
+    }
+    return{ok:true,value:{serviceReady:true,authenticated,responseCode,username}};
   }
   if(input.type==="upload"){
     const binary=Uint8Array.from(atob(input.dataBase64),c=>c.charCodeAt(0));
@@ -1198,6 +1202,8 @@ class OfficialSession {
     this.mutationActive = false;
     this.confirmations = new Map();
     this.rollbacks = new Map();
+    this.authenticatedUsername = "";
+    this.pendingUsername = "";
   }
 
   _log(level, ...values) {
@@ -1220,6 +1226,16 @@ class OfficialSession {
 
   _newToken(bytes = 24) {
     return this.randomBytes(bytes).toString("base64url");
+  }
+
+  async _storeAuthenticatedUsername(username) {
+    if (!this._isWindowUsable()) return;
+    const value = String(username || "").trim();
+    try {
+      await this.window.webContents.executeJavaScript(
+        `try { localStorage.setItem("_qh_patrol_authenticated_username", ${JSON.stringify(value)}); true; } catch (_) { false; }`
+      );
+    } catch {}
   }
 
   _isWindowUsable() {
@@ -1382,6 +1398,7 @@ class OfficialSession {
     }
 
     await this._clickLoginButton();
+    this.pendingUsername = username;
     await new Promise((resolve) => setTimeout(resolve, 800));
     if (this._isWindowUsable()) {
       this.window.show();
@@ -1397,6 +1414,8 @@ class OfficialSession {
 
   async logout() {
     if (!this._isWindowUsable()) {
+      this.authenticatedUsername = "";
+      this.pendingUsername = "";
       return {
         ok: true,
         windowOpen: false,
@@ -1445,7 +1464,11 @@ class OfficialSession {
             const keys = [];
             for (let index = 0; index < store.length; index += 1) {
               const key = store.key(index);
-              if (tokenPattern.test(String(key)) || key === '_captcha_solved') keys.push(key);
+              if (
+                tokenPattern.test(String(key))
+                || key === '_captcha_solved'
+                || key === '_qh_patrol_authenticated_username'
+              ) keys.push(key);
             }
             keys.forEach(function(key) { store.removeItem(key); });
           } catch(e) {}
@@ -1484,6 +1507,8 @@ class OfficialSession {
         "官方系统退出后仍检测到有效登录状态"
       );
     }
+    this.authenticatedUsername = "";
+    this.pendingUsername = "";
     return {
       ...after,
       ok: true,
@@ -1935,11 +1960,21 @@ class OfficialSession {
     }
 
     // 1. 先检查是否已登录
+    const requestedUsername = username.trim();
     const current = await this.status();
-    if (current.authenticated && current.serviceReady) {
+    if (
+      current.authenticated
+      && current.serviceReady
+      && current.username === requestedUsername
+    ) {
       this._log("log", "[auto-login] already authenticated, skipping");
       return current;
     }
+    if (current.authenticated && current.serviceReady) {
+      this._log("log", `[auto-login] switching authenticated account to ${requestedUsername}`);
+      await this.logout();
+    }
+    this.pendingUsername = requestedUsername;
 
     // 2. 如果已有窗口但不在登录页，关闭重建（避免缓存状态干扰）
     if (this._isWindowUsable()) {
@@ -2122,7 +2157,11 @@ class OfficialSession {
       }
 
       if (success) {
-        return authenticatedStatus || this.status({ createWindow: false });
+        const result = authenticatedStatus || await this.status({ createWindow: false });
+        this.authenticatedUsername = requestedUsername;
+        this.pendingUsername = "";
+        await this._storeAuthenticatedUsername(requestedUsername);
+        return { ...result, username: requestedUsername };
       }
 
       this._log("warn", `[auto-login] round ${round + 1} exhausted, retrying...`);
@@ -2143,7 +2182,10 @@ class OfficialSession {
       const status = await this.status({ createWindow: false });
       if (status.authenticated && status.serviceReady) {
         this._log("log", "[auto-login] manual login succeeded");
-        return status;
+        this.authenticatedUsername = requestedUsername;
+        this.pendingUsername = "";
+        await this._storeAuthenticatedUsername(requestedUsername);
+        return { ...status, username: requestedUsername };
       }
       await new Promise((resolve) => setTimeout(resolve, 800));
     }
@@ -2189,6 +2231,7 @@ class OfficialSession {
     const createWindow = options.createWindow !== false;
     if (createWindow) await this.ensureWindow({ show: false });
     if (!this._isWindowUsable()) {
+      this.authenticatedUsername = "";
       return {
         ok: true,
         windowOpen: false,
@@ -2213,13 +2256,24 @@ class OfficialSession {
     }
     try {
       const pageStatus = await this._executePage({ type: "status" });
+      const authenticated = pageStatus.authenticated === true;
+      if (authenticated && this.pendingUsername) {
+        this.authenticatedUsername = this.pendingUsername;
+        this.pendingUsername = "";
+        await this._storeAuthenticatedUsername(this.authenticatedUsername);
+      } else if (authenticated && pageStatus.username) {
+        this.authenticatedUsername = String(pageStatus.username).trim();
+      } else if (!authenticated) {
+        this.authenticatedUsername = "";
+      }
       return {
         ok: true,
         windowOpen: true,
         loaded: true,
-        authenticated: pageStatus.authenticated === true,
+        authenticated,
         serviceReady: pageStatus.serviceReady === true,
-        loginRequired: pageStatus.authenticated !== true,
+        loginRequired: !authenticated,
+        username: authenticated ? this.authenticatedUsername : "",
         partition: OFFICIAL_PARTITION
       };
     } catch (error) {
