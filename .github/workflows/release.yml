@@ -1,6 +1,9 @@
 name: Release Electron
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -12,8 +15,11 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -45,7 +51,7 @@ jobs:
       - name: Validate release tag
         shell: pwsh
         run: |
-          if ("${{ inputs.tag }}" -notmatch '^v\d+\.\d+\.\d+$') {
+          if ("${{ env.RELEASE_TAG }}" -notmatch '^v\d+\.\d+\.\d+$') {
             throw "Tag must use the vMAJOR.MINOR.PATCH format."
           }
 
@@ -55,7 +61,7 @@ jobs:
       - name: Set package version
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag }}".Substring(1)
+          $version = "${{ env.RELEASE_TAG }}".Substring(1)
           npm pkg set version=$version
 
       - name: Run tests
@@ -68,13 +74,13 @@ jobs:
           npx electron-builder --win nsis --${{ matrix.arch }} `
             --publish never `
             --config.electronVersion=${{ matrix.electron }} `
-            --config.win.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-${{ matrix.suffix }}.exe
+            --config.win.artifactName=Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-${{ matrix.suffix }}.exe
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.suffix }}
-          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-${{ matrix.suffix }}.exe
+          path: dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-${{ matrix.suffix }}.exe
           if-no-files-found: error
 
   build-macos:
@@ -92,7 +98,7 @@ jobs:
 
       - name: Validate release tag
         run: |
-          [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+          [[ "${{ env.RELEASE_TAG }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Tag must use the vMAJOR.MINOR.PATCH format." >&2
             exit 1
           }
@@ -102,7 +108,7 @@ jobs:
 
       - name: Set package version
         run: |
-          tag="${{ inputs.tag }}"
+          tag="${{ env.RELEASE_TAG }}"
           npm pkg set version="${tag#v}"
 
       - name: Run tests
@@ -114,13 +120,13 @@ jobs:
           npx electron-builder --mac dmg --arm64 \
             --publish never \
             --config.electronVersion=22.3.27 \
-            --config.mac.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-arm64.dmg
+            --config.mac.artifactName=Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-macOS-arm64.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: macOS-arm64
-          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-macOS-arm64.dmg
+          path: dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-macOS-arm64.dmg
           if-no-files-found: error
 
   build-linux:
@@ -138,7 +144,7 @@ jobs:
 
       - name: Validate release tag
         run: |
-          [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+          [[ "${{ env.RELEASE_TAG }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Tag must use the vMAJOR.MINOR.PATCH format." >&2
             exit 1
           }
@@ -148,7 +154,7 @@ jobs:
 
       - name: Set package version
         run: |
-          tag="${{ inputs.tag }}"
+          tag="${{ env.RELEASE_TAG }}"
           npm pkg set version="${tag#v}"
 
       - name: Run tests
@@ -160,13 +166,13 @@ jobs:
           npx electron-builder --linux AppImage --arm64 \
             --publish never \
             --config.electronVersion=22.3.27 \
-            --config.linux.artifactName=Yunjiaokou-Patrol-${{ inputs.tag }}-Linux-aarch64.AppImage
+            --config.linux.artifactName=Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.AppImage
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
           name: Linux-aarch64-AppImage
-          path: dist/Yunjiaokou-Patrol-${{ inputs.tag }}-Linux-aarch64.AppImage
+          path: dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.AppImage
           if-no-files-found: error
 
   publish:
@@ -189,7 +195,7 @@ jobs:
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             obsolete_asset_id="$(
