@@ -1,6 +1,6 @@
 {
   "name": "qh-duty-desk",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "韵家口大队巡查记录工作台",
   "author": {
     "name": "blingcc",
@@ -24,6 +24,7 @@
     "train:history": "node scripts/train-history-knowledge.mjs",
     "export:history": "node scripts/export-history-fixtures.mjs",
     "ocr:history:mac": "swift scripts/apple-vision-ocr.swift",
+    "test:userscript": "node test/tampermonkey-sim.mjs",
     "desktop:dev": "npm run build && electron electron/main.cjs",
     "package:mac": "npm run build:native-ocr:mac && npm run build && electron-builder --mac",
     "package:win": "npm run build && electron-builder --win",
