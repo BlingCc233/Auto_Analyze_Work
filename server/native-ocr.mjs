@@ -1,18 +1,12 @@
-import { createHash } from "node:crypto";
-import { readFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
+import { formatPpOcrResult } from "./ppocrv6-runtime.mjs";
+import {
+  recognizePpOcrWasm,
+  resetPpOcrWasmForTests
+} from "./ppocrv6-wasm.mjs";
 
-const execFileAsync = promisify(execFile);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MIME_EXTENSIONS = Object.freeze({
-  "image/jpeg": ".jpg",
-  "image/png": ".png"
-});
-
-let binaryPromise;
+const SUPPORTED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 
 function nativeOcrError(code, message) {
   const error = new Error(message);
@@ -36,55 +30,12 @@ function detectMime(buffer) {
   return "";
 }
 
-async function ensureVisionBinary({ root = path.resolve(".") } = {}) {
-  if (process.platform !== "darwin") {
-    throw nativeOcrError(
-      "NATIVE_OCR_UNAVAILABLE",
-      "当前平台不支持Apple Vision OCR"
-    );
-  }
-  if (!binaryPromise) {
-    binaryPromise = (async () => {
-      const bundledCandidates = [
-        path.join(root, "ocr", "bin", "apple-vision-ocr"),
-        path.join(root, "build", "apple-vision-ocr")
-      ];
-      for (const candidate of bundledCandidates) {
-        try {
-          const file = await stat(candidate);
-          if (file.isFile()) return candidate;
-        } catch {}
-      }
-      const sourcePath = path.join(root, "scripts", "apple-vision-ocr.swift");
-      const source = await readFile(sourcePath);
-      const hash = createHash("sha256").update(source).digest("hex").slice(0, 16);
-      const binaryPath = path.join(tmpdir(), `qh-duty-vision-ocr-${hash}`);
-      try {
-        const file = await stat(binaryPath);
-        if (file.isFile()) return binaryPath;
-      } catch {}
-      await execFileAsync("swiftc", [sourcePath, "-o", binaryPath], {
-        timeout: 60_000,
-        maxBuffer: 4 * 1024 * 1024
-      });
-      return binaryPath;
-    })().catch((error) => {
-      binaryPromise = null;
-      throw nativeOcrError(
-        "NATIVE_OCR_START_FAILED",
-        `无法启动Apple Vision OCR：${error.message}`
-      );
-    });
-  }
-  return binaryPromise;
-}
-
 function decodeImage(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw nativeOcrError("INVALID_OCR_REQUEST", "OCR请求格式无效");
   }
   const mimeType = String(input.mimeType || "").toLowerCase();
-  if (!MIME_EXTENSIONS[mimeType]) {
+  if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
     throw nativeOcrError("INVALID_OCR_IMAGE", "OCR仅支持JPEG或PNG图片");
   }
   if (typeof input.dataBase64 !== "string" || !input.dataBase64) {
@@ -104,37 +55,24 @@ export async function recognizeNativeImage(input, {
   root = path.resolve(".")
 } = {}) {
   const { buffer, mimeType } = decodeImage(input);
-  const binary = await ensureVisionBinary({ root });
-  const directory = await mkdtemp(path.join(tmpdir(), "qh-duty-ocr-"));
-  const imagePath = path.join(directory, `image${MIME_EXTENSIONS[mimeType]}`);
   try {
-    await writeFile(imagePath, buffer, { flag: "wx" });
-    const { stdout } = await execFileAsync(binary, [imagePath], {
-      timeout: 45_000,
-      maxBuffer: 16 * 1024 * 1024
-    });
-    let result;
-    try {
-      [result] = JSON.parse(stdout);
-    } catch {
-      throw nativeOcrError("NATIVE_OCR_FAILED", "Apple Vision OCR返回格式无效");
+    return formatPpOcrResult(
+      await recognizePpOcrWasm(buffer, mimeType, { root })
+    );
+  } catch (error) {
+    if (error?.code === "PPOCRV6_START_FAILED") {
+      throw nativeOcrError("NATIVE_OCR_START_FAILED", error.message);
     }
-    if (result?.error) {
-      throw nativeOcrError("NATIVE_OCR_FAILED", result.error);
+    if (error?.code === "PPOCRV6_UNAVAILABLE") {
+      throw nativeOcrError("NATIVE_OCR_UNAVAILABLE", error.message);
     }
-    const text = String(result?.text || "");
-    return {
-      ok: true,
-      engine: "apple-vision",
-      ocrText: text,
-      timeOcrText: String(result?.timeText || ""),
-      confidence: text.trim() ? 99 : 0
-    };
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+    throw nativeOcrError(
+      "NATIVE_OCR_FAILED",
+      `PP-OCRv6识别失败：${error?.message || "未知错误"}`
+    );
   }
 }
 
 export function resetNativeOcrForTests() {
-  binaryPromise = null;
+  resetPpOcrWasmForTests();
 }

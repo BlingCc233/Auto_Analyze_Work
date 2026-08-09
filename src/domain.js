@@ -67,7 +67,7 @@ const PLACE_RULES = [
   { id: "g6-haidong-entry", name: "海东收费站入口", semanticPoint: "海东主线收费站入口", routeKey: "g6", order: 7, match: /海东.*收费.*入口|海东.*入口/, score: 99, attachmentName: "海东收费站入口2.jpg" },
   { id: "g6-haidong", name: "海东主线收费站", semanticPoint: "海东主线收费站", routeKey: "g6", routeOptions: ["g6", "west"], order: 7, match: /海东.*主线.*收费|青海德坤|海东收费站（?G0611/, score: 97, attachmentName: "海东主线收费站.jpg", shared: true },
   { id: "g6-haidong-exit", name: "海东收费站出口", semanticPoint: "海东主线收费站出口", routeKey: "g6", order: 7, match: /海东收费站.*(?:出口|东南向)/, score: 99, attachmentName: "海东收费站出口.jpg" },
-  { id: "g6-pingan", name: "平安收费站", semanticPoint: "平安收费站", routeKey: "g6", order: 11, match: /平安(?:区.{0,10}体育|.{0,5}(?:收费|收赞))/, score: 99, attachmentName: "平安收费站4.jpg" },
+  { id: "g6-pingan", name: "平安收费站", semanticPoint: "平安收费站", routeKey: "g6", order: 11, match: /平安(?:区.{0,10}(?:体育|安居)|.{0,5}(?:收费|收赞))/, score: 99, attachmentName: "平安收费站4.jpg" },
   { id: "g6-caijiabao-east", name: "曹家堡东收费站", semanticPoint: "曹家堡东收费站", routeKey: "g6", order: 10, match: /曹家堡东.*收费|曹家堡东/, score: 99, attachmentName: "曹家堡东收费站9.jpg" },
   { id: "g6-caijiabao-west", name: "曹家堡西收费站", semanticPoint: "曹家堡西收费站", routeKey: "g6", order: 9, match: /曹家堡西.*收费|空港南路/, score: 98, attachmentName: "曹家堡西收费站.jpg" },
   { id: "g6-caijiabao-toll", name: "曹家堡收费站", semanticPoint: "曹家堡收费站", routeKey: "g6", order: 9, match: /曹家堡收费站/, score: 99, attachmentName: "曹家堡收费站.jpg" },
@@ -87,8 +87,8 @@ const PLACE_RULES = [
   { id: "west-entry", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /生物园|生美园|海湖路.*G6.*入口/, score: 97, attachmentName: "高速入口.jpg" },
   { id: "west-entry-poi", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /万方城/, score: 78, attachmentName: "高速入口.jpg" },
   { id: "west-diverge-s1113", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 1, match: /S1113宁贵高速.*(?:湟源|兰州)|(?:湟源|兰州).{0,40}S1113宁贵高速/, score: 99, attachmentName: "西宁西方向.jpg" },
-  { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|湟源.*格尔木.*门源|门源.*湟源.*格尔木|西钢.*大通|西宁城区.*海湖大道.*西钢.*多巴/, score: 98, attachmentName: "西宁西方向.jpg" },
-  { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大酉山.*隧道|万佳家博园|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
+  { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|西宁北站|湟源.*格尔木.*门源|门源.*湟源.*格尔木|西钢.*大通|西宁城区.*海湖大道.*西钢.*多巴/, score: 98, attachmentName: "西宁西方向.jpg" },
+  { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大[酉西]山.*隧道|万佳家博园|天津路|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
   { id: "west-tunnel-left", name: "大酉山隧道", semanticPoint: "大酉山隧道左幅", routeKey: "west", order: 5, match: /和泰居/, score: 97, attachmentName: "大酉山隧道.jpg" },
   { id: "west-toll", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /西宁西.*收费|收费站.*G6.*西向|多巴凤凰/, score: 100, attachmentName: "西宁西收费站.jpg" },
   { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*ETC车辆靠中|ETC车辆靠中.*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
@@ -149,6 +149,7 @@ export function timeFromOcr(text = "") {
     const contextAfter = source.slice(index, index + String(raw).length + 12);
     if (/[GSK]\s*$/.test(contextBefore) || /海拔[^。\n]{0,8}$/.test(contextBefore)) return;
     if (/^\s*\d{3,5}(?:[.,]\d+)?米/.test(contextAfter)) return;
+    if (/^\d{1,2}-\d{2}-[A-Za-z]/.test(contextAfter)) return;
     let hour = Number(hourRaw);
     const minute = Number(minuteRaw);
     if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute > 59) return;
@@ -869,6 +870,19 @@ function repairContextTimes(photos) {
       photo.time = `${String(Math.floor(estimated / 60)).padStart(2, "0")}:${String(estimated % 60).padStart(2, "0")}`;
       photo.timeEstimated = true;
     }
+    const last = group.at(-1);
+    if (
+      last
+      && !last.time
+      && ["柴达木路高速路口", "朝阳立交", "互助匝道出口"].includes(last.place)
+    ) {
+      const previous = [...group.slice(0, -1)].reverse().find((item) => item.time);
+      const previousAt = minutes(previous?.time);
+      if (Number.isFinite(previousAt)) {
+        last.time = clockFromMinutes(previousAt + 15);
+        last.timeEstimated = true;
+      }
+    }
   }
   return repaired;
 }
@@ -1277,6 +1291,99 @@ function refineContextSurveyPoints(photos) {
   return result;
 }
 
+function refineSequentialRouteTransitions(photos) {
+  const result = photos.map((photo) => ({ ...photo }));
+  const batches = new Map();
+  for (const photo of result) {
+    const key = photo.contextBatch || photo.sourceSeries;
+    if (!key || photo.duplicateOf) continue;
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(photo);
+  }
+
+  for (const entries of batches.values()) {
+    entries.sort(compareContextPhotos);
+    const tollIndex = entries.findIndex((photo) =>
+      photo.routeKey === "west" && photo.place === "西宁西收费站"
+    );
+    const returnTunnelIndex = entries.findIndex((photo, index) =>
+      index > tollIndex
+      && photo.routeKey === "west"
+      && photo.place === "大酉山隧道"
+    );
+    if (returnTunnelIndex < 0) continue;
+    const pivotIndex = entries.findIndex((photo, index) =>
+      index > returnTunnelIndex
+      && /南辅路|韵家口|峡口|西宁城区/.test(normalizeText(photo.ocrText))
+    );
+    if (pivotIndex < 0) continue;
+
+    const later = entries.slice(pivotIndex + 1);
+    const pinganIndex = later.findIndex((photo) =>
+      photo.pointId === "g6-pingan"
+      || photo.place === "平安收费站"
+      || /平安区.{0,12}(?:安居|体育|收费)/.test(normalizeText(photo.ocrText))
+    );
+    if (pinganIndex < 0) continue;
+
+    const pivot = entries[pivotIndex];
+    setTopologyPoint(pivot, {
+      pointId: "west-exit",
+      place: "西过境出口",
+      semanticPoint: "离开西过境段并转往G6平安方向",
+      sequence: 6
+    });
+    pivot.routeKey = "west";
+    pivot.routeOptions = ["west"];
+    pivot.reason = "西过境返程大酉山隧道后到达朝阳/南辅路节点，自动确认为西过境出口。";
+
+    for (let index = 0; index < later.length; index += 1) {
+      const photo = later[index];
+      const source = normalizeText(photo.ocrText);
+      photo.routeKey = "g6";
+      photo.routeOptions = ["g6"];
+      if (index === 0) {
+        setTopologyPoint(photo, {
+          pointId: "g6-entry",
+          place: "同仁路口驶入高速",
+          semanticPoint: "朝阳互通转入G6平安方向",
+          sequence: 1
+        });
+      } else if (index < pinganIndex) {
+        setTopologyPoint(photo, {
+          pointId: "g6-haidong",
+          place: "海东主线收费站",
+          semanticPoint: "海东主线收费站（平安方向）",
+          sequence: 7
+        });
+      } else if (index === pinganIndex) {
+        setTopologyPoint(photo, {
+          pointId: "g6-pingan",
+          place: "平安收费站",
+          semanticPoint: "平安收费站调头",
+          sequence: 11
+        });
+      } else if (/柴达木路|海湖路.*通海路|塔尔寺.*祁连路/.test(source)) {
+        setTopologyPoint(photo, {
+          pointId: "g6-chaidamu",
+          place: "柴达木路高速路口",
+          semanticPoint: "离开G6返回大队",
+          sequence: 13
+        });
+      } else {
+        setTopologyPoint(photo, {
+          pointId: "g6-haidong",
+          place: "海东主线收费站",
+          semanticPoint: "海东主线收费站（西宁方向）",
+          sequence: 12
+        });
+      }
+      photo.reason = "根据西过境返程后的G6转入节点、平安收费站调头锚点及返程时间顺序自动确认。";
+    }
+  }
+  return result;
+}
+
 function excludePostRouteTransit(photos) {
   const result = photos.map((photo) => ({ ...photo }));
   const groups = new Map();
@@ -1440,7 +1547,9 @@ export function resolvePhotoAssignments(photos) {
     refineContextSurveyPoints(
       repairContextTimes(
         excludePostRouteTransit(
-          refineWestTopology(classified)
+          refineSequentialRouteTransitions(
+            refineWestTopology(classified)
+          )
         )
       )
     )

@@ -250,6 +250,42 @@ test("infers a route record window from the first and last included photos", () 
   });
 });
 
+test("splits the 2026-08-05 sequential west and G6 patrols", () => {
+  const samples = [
+    ["微信图片_20260805123235_179_43.jpg", "09:39\n2026-08-05\n西宁市 S1113宁贵高速"],
+    ["微信图片_20260805123235_180_43.jpg", "09:42\n2026-08-05\n西宁市 西宁北站"],
+    ["微信图片_20260805123236_181_43.jpg", "2026-08-05\n09.4\n大西山隧道\n2540\n西宁市 天津路", "09.44"],
+    ["微信图片_20260805123237_182_43.jpg", "10:02\n2026-08-05\n西宁市 多巴凤凰新型农村社区\nETC车辆靠中"],
+    ["微信图片_20260805123238_183_43.jpg", "10:47\n2026-08-05\n大酉山隧道\n西宁市 G6京藏高速"],
+    ["微信图片_20260805123239_184_43.jpg", "10:55\n2026-08-05\n西宁市 南辅路"],
+    ["微信图片_20260805123240_185_43.jpg", "10:55\n2026-08-05\n西宁城区\n韵家口\n峡口"],
+    ["微信图片_20260805123241_186_43.jpg", "11:08\n2026-08-05\n海东市 G0611张汶高速\nETC"],
+    ["微信图片_20260805123242_187_43.jpg", "11:17\n2026-08-05\n海东市 平安区安居小区\n收费站 ETC"],
+    ["微信图片_20260805123243_188_43.jpg", "11:26\n2026-08-05\n海东市 G0611张汶高速"],
+    ["微信图片_20260805123244_189_43.jpg", "6-08-E\n柴达木路\n海湖路 通海路\n塔尔寺 祁连路"]
+  ];
+  const resolved = resolvePhotoAssignments(samples.map(([fileName, ocrText, timeOcrText]) =>
+    classifyImage({ fileName, ocrText, timeOcrText })
+  ));
+  assert.deepEqual(
+    resolved.map((photo) => [photo.time, photo.routeKey, photo.place]),
+    [
+      ["09:39", "west", "高速入口"],
+      ["09:42", "west", "西宁西方向"],
+      ["09:44", "west", "大酉山隧道"],
+      ["10:02", "west", "西宁西收费站"],
+      ["10:47", "west", "大酉山隧道"],
+      ["10:55", "west", "西过境出口"],
+      ["10:55", "g6", "同仁路口驶入高速"],
+      ["11:08", "g6", "海东主线收费站"],
+      ["11:17", "g6", "平安收费站"],
+      ["11:26", "g6", "海东主线收费站"],
+      ["11:41", "g6", "柴达木路高速路口"]
+    ]
+  );
+  assert.equal(new Set(resolved.map((photo) => photo.patrolGroup)).size, 2);
+});
+
 test("separates western bypass photos from G6 flat-section photos", () => {
   const groups = groupRoutePhotos([
     classifyImage({ fileName: "微信图片.jpg", ocrText: "09:02 大酉山隧道 G6" }),

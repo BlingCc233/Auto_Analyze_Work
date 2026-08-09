@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.0.3
+        description: Release tag, for example v0.0.5
         required: true
-        default: v0.0.3
+        default: v0.0.5
         type: string
 
 permissions:
@@ -110,7 +110,6 @@ jobs:
 
       - name: Build arm64 DMG
         run: |
-          npm run build:native-ocr:mac
           npm run build
           npx electron-builder --mac dmg --arm64 \
             --publish never \

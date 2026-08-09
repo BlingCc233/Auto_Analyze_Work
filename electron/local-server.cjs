@@ -285,6 +285,11 @@ function nativeOcrModuleCandidates(appRoot) {
     join(appRoot, "server", "native-ocr.mjs"),
     join(__dirname, "..", "server", "native-ocr.mjs")
   ];
+  if (String(appRoot).endsWith(".asar")) {
+    candidates.unshift(
+      join(`${appRoot}.unpacked`, "server", "native-ocr.mjs")
+    );
+  }
   if (process.resourcesPath) {
     candidates.push(
       join(process.resourcesPath, "server", "native-ocr.mjs"),
@@ -322,7 +327,7 @@ async function loadNativeOcrModule(appRoot) {
       if (error?.code !== "ENOENT") {
         throw localError(
           "NATIVE_OCR_START_FAILED",
-          "无法加载Apple Vision OCR组件",
+          "无法加载PP-OCRv6组件",
           200
         );
       }
@@ -330,7 +335,7 @@ async function loadNativeOcrModule(appRoot) {
   }
   throw localError(
     "NATIVE_OCR_UNAVAILABLE",
-    "当前安装未提供Apple Vision OCR组件",
+    "当前安装未提供PP-OCRv6组件",
     200
   );
 }
@@ -348,8 +353,8 @@ function publicOcrError(error) {
   ]);
   const code = knownCodes.has(error?.code) ? error.code : "NATIVE_OCR_FAILED";
   const fallback = code === "NATIVE_OCR_UNAVAILABLE"
-    ? "当前平台不支持Apple Vision OCR"
-    : "Apple Vision OCR识别失败";
+    ? "当前安装未提供PP-OCRv6模型"
+    : "PP-OCRv6识别失败";
   const exposeMessage = knownCodes.has(error?.code);
   return {
     ok: false,

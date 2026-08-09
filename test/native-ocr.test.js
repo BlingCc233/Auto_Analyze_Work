@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import { recognizeNativeImage } from "../server/native-ocr.mjs";
 import { timeFromOcrEvidence } from "../src/domain.js";
 
-test("Apple Vision bridge reads a patrol watermark from raw image bytes", {
-  skip: process.platform !== "darwin",
+test("PP-OCRv6 bridge reads a patrol watermark from raw image bytes", {
   timeout: 30_000
 }, async () => {
   const buffer = await readFile(new URL(
@@ -20,13 +19,12 @@ test("Apple Vision bridge reads a patrol watermark from raw image bytes", {
     root: fileURLToPath(new URL("..", import.meta.url))
   });
   assert.equal(result.ok, true);
-  assert.equal(result.engine, "apple-vision");
+  assert.equal(result.engine, "ppocrv6-tiny-wasm");
   assert.match(result.ocrText, /08:57/);
   assert.match(result.ocrText, /S1113宁贵高速/);
 });
 
-test("Apple Vision time crop restores the 11:41 watermark", {
-  skip: process.platform !== "darwin",
+test("PP-OCRv6 time crop restores the 11:41 watermark", {
   timeout: 30_000
 }, async () => {
   const buffer = await readFile(new URL(

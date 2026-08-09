@@ -1,6 +1,6 @@
 {
   "name": "qh-duty-desk",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "韵家口大队巡查记录工作台",
   "author": {
     "name": "blingcc",
@@ -12,9 +12,8 @@
   "scripts": {
     "dev": "node server.mjs",
     "build": "vite build",
-    "build:native-ocr:mac": "swiftc scripts/apple-vision-ocr.swift -o build/apple-vision-ocr",
     "test": "node --test",
-    "test:ci": "node --test test/domain.test.js test/local-origin.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs",
+    "test:ci": "node --test test/domain.test.js test/local-origin.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs test/ppocrv6-wasm.test.js",
     "benchmark:acceptance": "node scripts/benchmark-acceptance.mjs",
     "benchmark:native-ocr": "node scripts/benchmark-native-ocr.mjs",
     "benchmark:holdout": "node scripts/benchmark-holdout.mjs",
@@ -31,8 +30,11 @@
     "package:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "jpeg-js": "^0.4.4",
+    "js-yaml": "^4.1.0",
     "lucide": "^0.468.0",
-    "tesseract.js": "^7.0.0"
+    "onnxruntime-web": "^1.27.0",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
     "electron": "22.3.27",
@@ -43,37 +45,35 @@
     "appId": "cn.qh.yunjiaokou.patrol-desk",
     "productName": "韵家口巡查工作台",
     "asar": true,
+    "asarUnpack": [
+      "server/**/*",
+      "node_modules/onnxruntime-web/**/*",
+      "node_modules/onnxruntime-common/**/*",
+      "node_modules/flatbuffers/**/*",
+      "node_modules/guid-typescript/**/*",
+      "node_modules/long/**/*",
+      "node_modules/platform/**/*",
+      "node_modules/protobufjs/**/*",
+      "node_modules/@protobufjs/**/*",
+      "node_modules/jpeg-js/**/*",
+      "node_modules/pngjs/**/*",
+      "node_modules/js-yaml/**/*"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "server/**/*",
       "!electron/**/*.messy",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "server/native-ocr.mjs",
-        "to": "server/native-ocr.mjs"
-      },
-      {
-        "from": "public/ocr-data",
-        "to": "ocr/tesseract",
-        "filter": [
-          "**/*"
-        ]
+        "from": "resources/ppocrv6",
+        "to": "ocr/models"
       }
     ],
     "mac": {
       "icon": "build/icon.icns",
-      "extraResources": [
-        {
-          "from": "scripts/apple-vision-ocr.swift",
-          "to": "scripts/apple-vision-ocr.swift"
-        },
-        {
-          "from": "build/apple-vision-ocr",
-          "to": "ocr/bin/apple-vision-ocr"
-        }
-      ],
       "target": [
         "dmg"
       ]
