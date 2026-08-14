@@ -120,6 +120,8 @@ test("builds an idempotent create-or-reuse plan without update identifiers", () 
   assert.equal("scheduleId" in plan.schedules[0].payload, false);
   assert.equal("recordId" in plan.records[0].payload, false);
   assert.equal("checklogId" in plan.journals[0].payload, false);
+  assert.equal(plan.records[0].payload.address, "韵家口大队");
+  assert.equal(plan.records[0].payload.drivingDirection, "全程");
   assert.equal(plan.records[0].payload.personName, "宁戎,杨富强,");
   assert.equal(plan.records[0].attachments.length, 3);
   assert.equal(plan.journals[0].payload.weather, "1");
@@ -307,6 +309,8 @@ test("updates only the uniquely matching July 27 records and keeps supplemental 
   assert.equal(g6Record.payload.recordId, "record-01603");
   assert.equal(g6Record.payload.recordNum, "01603");
   assert.equal(g6Record.payload.checkType, "公路巡查");
+  assert.equal(g6Record.payload.address, "韵家口大队");
+  assert.equal(g6Record.payload.drivingDirection, "全程");
   assert.equal(westRecord.payload.recordId, "record-01604");
   assert.equal(westRecord.payload.recordNum, "01604");
   assert.equal(

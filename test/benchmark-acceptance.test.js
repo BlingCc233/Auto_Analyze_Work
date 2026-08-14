@@ -102,14 +102,14 @@ test("ground-truth hints never enter classify or resolve", () => {
   assert.deepEqual(gateResult(result), []);
 });
 
-test("acceptance gate defaults to 95% and supports metric overrides", () => {
+test("acceptance gate defaults to 100% and supports metric overrides", () => {
   assert.deepEqual(DEFAULT_THRESHOLDS, {
-    time: 0.95,
-    route: 0.95,
-    point: 0.95,
-    include: 0.95,
-    naming: 0.95,
-    grouping: 0.95
+    time: 1,
+    route: 1,
+    point: 1,
+    include: 1,
+    naming: 1,
+    grouping: 1
   });
   assert.deepEqual(parseThresholds(["--threshold=0.96"]), {
     time: 0.96,
@@ -124,7 +124,7 @@ test("acceptance gate defaults to 95% and supports metric overrides", () => {
   const result = {
     metrics: Object.fromEntries(METRIC_KEYS.map((key) => [
       key,
-      { key, accuracy: key === "time" ? 0.9499 : 0.95 }
+      { key, accuracy: key === "time" ? 0.9999 : 1 }
     ]))
   };
   assert.deepEqual(gateResult(result).map((metric) => metric.key), ["time"]);

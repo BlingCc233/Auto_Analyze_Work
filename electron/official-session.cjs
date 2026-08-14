@@ -77,8 +77,8 @@ const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
     "schedulePersonnel", "schedulePersonnelId", "patrolRoute", "times", "content"
   ],
   record: [
-    "checkStartTime", "checkEndTime", "checkCategory", "checkType", "cateId",
-    "cateName", "roadCondition", "roadNum", "roadName", "describes",
+    "checkStartTime", "checkEndTime", "checkCategory", "checkType", "address",
+    "cateId", "cateName", "roadCondition", "drivingDirection", "roadNum", "roadName", "describes",
     "personIds", "personName", "listPer"
   ],
   journal: [
@@ -773,7 +773,10 @@ function recordEquivalent(existing, payload) {
     && normalizedText(existing.oid) === normalizedText(payload.oid)
     && normalizedText(existing.cateId) === normalizedText(payload.cateId)
     && normalizedText(existing.checkCategory) === normalizedText(payload.checkCategory)
+    && normalizedText(existing.address) === normalizedText(payload.address)
     && normalizedText(existing.roadCondition) === normalizedText(payload.roadCondition)
+    && normalizedText(existing.drivingDirection)
+      === normalizedText(payload.drivingDirection)
     && equalSets(existing.roadNum, payload.roadNum)
     && equalSets(existing.roadName, payload.roadName)
     && numericTextEqual(existing.startKilometer, payload.startKilometer)
@@ -1524,13 +1527,33 @@ class OfficialSession {
     if (!this._isWindowUsable()) return;
     const wc = this.window.webContents;
     try {
-      await wc.executeJavaScript(
-        'new Promise((resolve) => { if (document.readyState === "complete") resolve(); else window.addEventListener("load", resolve, { once: true }); })'
-      );
+      await wc.executeJavaScript(`new Promise((resolve) => {
+        const ready = () => document.readyState === "complete" && (
+          document.querySelector('#app')
+          || document.querySelector('input[type="password"]')
+        );
+        if (ready()) return resolve();
+        const observer = new MutationObserver(() => {
+          if (!ready()) return;
+          observer.disconnect();
+          resolve();
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        window.addEventListener('load', () => {
+          if (ready()) {
+            observer.disconnect();
+            resolve();
+          }
+        }, { once: true });
+        setTimeout(() => {
+          observer.disconnect();
+          resolve();
+        }, 1500);
+      })`);
     } catch {
       // Ignore if page isn't ready for JS execution
     }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
   async _fillLoginForm(username, password) {
@@ -1961,7 +1984,7 @@ class OfficialSession {
 
     // 1. 先检查是否已登录
     const requestedUsername = username.trim();
-    const current = await this.status();
+    const current = await this.status({ createWindow: false });
     if (
       current.authenticated
       && current.serviceReady
@@ -1976,15 +1999,9 @@ class OfficialSession {
     }
     this.pendingUsername = requestedUsername;
 
-    // 2. 如果已有窗口但不在登录页，关闭重建（避免缓存状态干扰）
-    if (this._isWindowUsable()) {
-      try { this.window.destroy(); } catch {}
-      this.window = null;
-      this.loadPromise = null;
-    }
-
-    // 3. 创建新窗口并导航到官方系统首页（未登录会自动跳转登录页）
-    this.window = new this.BrowserWindow({
+    // 2. 复用已有官方窗口，避免状态检查后销毁并重复加载官网。
+    if (!this._isWindowUsable()) {
+      this.window = new this.BrowserWindow({
       width: 1320,
       height: 900,
       minWidth: 980,
@@ -2000,14 +2017,21 @@ class OfficialSession {
         webSecurity: true
       }
     });
-    this._attachWindowGuards(this.window);
-    this.window.on("closed", () => {
-      this.window = null;
-      this.loadPromise = null;
-    });
-
-    // 加载官方系统页面
-    await this.window.loadURL(this.officialUrl);
+      this._attachWindowGuards(this.window);
+      this.window.on("closed", () => {
+        this.window = null;
+        this.loadPromise = null;
+      });
+      await this.window.loadURL(this.officialUrl);
+    } else {
+      const currentUrl = String(this.window.webContents.getURL() || "");
+      const officialOrigin = new URL(this.officialUrl).origin;
+      if (!currentUrl.startsWith(officialOrigin)) {
+        await this.window.loadURL(this.officialUrl);
+      } else if (!/\/#\/login(?:[/?#]|$)/i.test(currentUrl)) {
+        await this.window.loadURL(`${officialOrigin}/#/login`);
+      }
+    }
     await this._waitForPageReady();
 
     // 4. 尝试最多 3 轮自动登录
@@ -2032,7 +2056,12 @@ class OfficialSession {
 
       // 4b. 点击登录按钮
       await this._clickLoginButton();
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      let sliderReady = null;
+      const sliderDeadline = Date.now() + 1500;
+      while (Date.now() < sliderDeadline && !sliderReady?.found) {
+        sliderReady = await this._detectSlider();
+        if (!sliderReady?.found) await new Promise((resolve) => setTimeout(resolve, 100));
+      }
 
       // 4c. Set up XHR interception to detect captcha success
       await this.window.webContents.executeJavaScript(`(function() {
@@ -2061,7 +2090,7 @@ class OfficialSession {
       })()`);
 
       // 4d. 检测滑块 + NCC缺口检测 + 精准拖拽
-      const slider = await this._detectSlider();
+      const slider = sliderReady || await this._detectSlider();
       let gapInfo = null;
 
       if (slider && slider.found) {
@@ -2151,7 +2180,7 @@ class OfficialSession {
             break;
           }
           if (!poll || !poll.slider) { this._log("log", "[auto-login] slider disappeared, waiting for login..."); }
-          await new Promise(r => setTimeout(r, poll && poll.token ? 500 : 800));
+          await new Promise(r => setTimeout(r, poll && poll.token ? 200 : 350));
         }
         if (success) break;
       }

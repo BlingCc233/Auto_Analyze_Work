@@ -13,12 +13,12 @@ const OCR_PATH = path.join(ROOT, "data/history/vision-ocr.json");
 const MANIFEST_PATH = path.join(ROOT, "data/history/manifest.json");
 
 export const DEFAULT_THRESHOLDS = {
-  time: 0.95,
-  route: 0.95,
-  point: 0.95,
-  include: 0.95,
-  naming: 0.95,
-  grouping: 0.95
+  time: 1,
+  route: 1,
+  point: 1,
+  include: 1,
+  naming: 1,
+  grouping: 1
 };
 
 const METRIC_LABELS = {

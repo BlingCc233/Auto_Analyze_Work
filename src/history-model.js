@@ -58,6 +58,7 @@ export function matchHistoricalKnowledge(ocrText = "") {
   return {
     ...best.item,
     score: best.score,
-    margin: best.score - (second?.score ?? 0)
+    margin: best.score - (second?.score ?? 0),
+    exact: normalizedText === best.item.normalizedText
   };
 }

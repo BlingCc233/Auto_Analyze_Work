@@ -6,6 +6,8 @@ export const OFFICIAL_PROFILE = Object.freeze({
   cateName: "公路路政",
   checkCategory: "ccbc9991ac759a654259abafb36e38b7",
   checkType: "公路巡查",
+  address: "韵家口大队",
+  drivingDirection: "全程",
   scheduler: "李彩燕"
 });
 
@@ -597,11 +599,11 @@ export function buildOfficialSubmitPlan({
       checkEndTime: draft.endTime,
       checkCategory: OFFICIAL_PROFILE.checkCategory,
       checkType: existingRecord?.checkType || OFFICIAL_PROFILE.checkType,
-      address: "",
+      address: OFFICIAL_PROFILE.address,
       cateId: OFFICIAL_PROFILE.cateId,
       cateName: OFFICIAL_PROFILE.cateName,
       roadCondition: "1",
-      drivingDirection: "",
+      drivingDirection: OFFICIAL_PROFILE.drivingDirection,
       roadNum: api.roadNum,
       roadName: api.roadName,
       startKilometer: start.kilometer,

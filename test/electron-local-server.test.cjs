@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { mkdir, mkdtemp, rm, stat, writeFile } = require("node:fs/promises");
 const { request } = require("node:http");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { join, resolve } = require("node:path");
 const {
   businessDate,
   resolveNativeOcrRuntimeRoot,
@@ -91,7 +91,7 @@ test("uses the external Resources directory as the packaged OCR runtime root", (
   );
   assert.equal(
     resolveNativeOcrRuntimeRoot("/workspace/patrol", resources),
-    "/workspace/patrol"
+    resolve("/workspace/patrol")
   );
 });
 

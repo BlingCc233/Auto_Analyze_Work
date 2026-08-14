@@ -33,7 +33,7 @@ const contentTypes = {
 };
 
 const DEFAULT_PORT = 5173;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_OCR_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
 const MIME_SIGNATURES = {
   "image/jpeg": (buffer) => (

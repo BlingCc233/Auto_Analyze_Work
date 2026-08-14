@@ -21,7 +21,7 @@ export const METRIC_KEYS = [
 ];
 
 export const DEFAULT_THRESHOLDS = Object.freeze(
-  Object.fromEntries(METRIC_KEYS.map((key) => [key, 0.95]))
+  Object.fromEntries(METRIC_KEYS.map((key) => [key, 1]))
 );
 
 const METRIC_LABELS = {

@@ -178,6 +178,79 @@ test("prefers a valid watermark clock before the date over a bad time crop", () 
   );
 });
 
+test("uses all 2026-08-14 watermark clocks instead of bad crop candidates", () => {
+  const samples = [
+    ["10:14", "02:14"],
+    ["10.:301", "10:30"],
+    ["10:421", ""],
+    ["L10-52", "11:20"],
+    ["11:15", "15:12"],
+    ["11:211", "12:11"],
+    ["11:33", "13:12"],
+    ["11:551", "15:51"]
+  ];
+  assert.deepEqual(
+    samples.map(([clock, crop]) => timeFromOcrEvidence(
+      `${clock}\n12026-08-14\n星期五晴19C`,
+      crop
+    )),
+    ["10:14", "10:30", "10:42", "10:52", "11:15", "11:21", "11:33", "11:55"]
+  );
+});
+
+test("resolves the verified 2026-08-09 G6 turnaround from route topology", () => {
+  const samples = [
+    ["微信图片_20260809140952_1_70.jpg", "09:20\n12026-08-09\n西宁市·鲁青水上公园"],
+    ["微信图片_20260809140956_2_70.jpg", "09:36\nT2026-08-09\n海东市·西宁东收费站(G0611张汶高速入口西北向)"],
+    ["微信图片_20260809141038_3_70.jpg", "09:46\nL2026-08-09\n海东市：G6京藏高速\nETC专用"],
+    ["微信图片_20260809141039_4_70.jpg", "09:56\n12026-08-09\n海东市：西宁东收费站(G0611张汶高速入口西北向)"],
+    ["微信图片_20260809141041_5_70.jpg", "1202608-09\n11:44\n西宁市·南辅路\n柴达木路\n祁连路"]
+  ];
+  const resolved = resolvePhotoAssignments(samples.map(([fileName, ocrText]) =>
+    classifyImage({ fileName, ocrText })
+  ));
+
+  assert.deepEqual(resolved.map(({ time, place, routeKey }) => ({ time, place, routeKey })), [
+    { time: "09:20", place: "朝阳立交", routeKey: "g6" },
+    { time: "09:36", place: "西宁东收费口", routeKey: "g6" },
+    { time: "09:46", place: "平安收费站", routeKey: "g6" },
+    { time: "09:56", place: "西宁东收费口", routeKey: "g6" },
+    { time: "11:44", place: "柴达木路高速路口", routeKey: "g6" }
+  ]);
+});
+
+test("resolves the verified 2026-08-14 G6 and western patrols", () => {
+  const samples = [
+    ["微信图片_20260814123104_16_70.jpg", "10:14\n12026-08-14\n西宁市·锦绣江南"],
+    ["微信图片_20260814123105_17_70.jpg", "10:30\n12026-08-14\n海东市·G0611张汶高速"],
+    ["微信图片_20260814123106_18_70.jpg", "10:42\n2026-08-14\n海东市·平安收费站(G6京藏高速出口)"],
+    ["微信图片_20260814123107_19_70.jpg", "L10-52\n12026-08-14具\n海东市·海东收费站1G061张汶高速东南向）"],
+    ["微信图片_20260814123108_20_70.jpg", "11:15\n12026-08-14\n西宁市·万佳家博园"],
+    ["微信图片_20260814123109_21_70.jpg", "11:211\n12026-08-14\n西宁市·西宁市城北区阳光宝贝幼儿园"],
+    ["微信图片_20260814123110_22_70.jpg", "11:33\n12026-08-14\n西宁市·109国道"],
+    ["微信图片_20260814123111_23_70.jpg", "11:551\n12026-08-14\n西宁市·G6京藏高速\n大面山腿道"]
+  ];
+  const resolved = resolvePhotoAssignments(samples.map(([fileName, ocrText]) =>
+    classifyImage({ fileName, ocrText })
+  ));
+
+  assert.deepEqual(resolved.map(({ time, place, routeKey, semanticPoint }) => ({
+    time, place, routeKey, semanticPoint
+  })), [
+    { time: "10:14", place: "朝阳立交", routeKey: "g6", semanticPoint: "朝阳互通立交" },
+    { time: "10:30", place: "海东主线收费站", routeKey: "g6", semanticPoint: "海东主线收费站" },
+    { time: "10:42", place: "平安收费站", routeKey: "g6", semanticPoint: "平安收费站" },
+    { time: "10:52", place: "海东收费站出口", routeKey: "g6", semanticPoint: "海东主线收费站出口" },
+    { time: "11:15", place: "大酉山隧道", routeKey: "west", semanticPoint: "大酉山隧道右幅" },
+    { time: "11:21", place: "西钢出口", routeKey: "west", semanticPoint: "西钢出口" },
+    { time: "11:33", place: "西宁西收费站", routeKey: "west", semanticPoint: "西宁西收费站" },
+    { time: "11:55", place: "大酉山隧道", routeKey: "west", semanticPoint: "大酉山隧道左幅" }
+  ]);
+  assert.equal(new Set(resolved.slice(0, 4).map((photo) => photo.recordGroup)).size, 1);
+  assert.equal(new Set(resolved.slice(4).map((photo) => photo.recordGroup)).size, 1);
+  assert.notEqual(resolved[0].recordGroup, resolved[4].recordGroup);
+});
+
 test("reads compact watermark time before the date instead of later road text", () => {
   const text = [
     "1109",

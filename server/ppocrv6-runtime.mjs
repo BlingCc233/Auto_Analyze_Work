@@ -54,6 +54,7 @@ export function clockFromLines(lines = []) {
     if (isDate(line.text)) continue;
     const source = String(line.text || "")
       .replace(/[Oo]/g, "0")
+      .replace(/(?<=\d)[Ee](?=\d)/g, ":")
       .replace(/[：·.-]/g, ":");
     const match = source.match(/([0-2]?\d)\s*:\s*([0-5]\d)/);
     if (match && Number(match[1]) <= 23) {
@@ -66,7 +67,7 @@ export function clockFromLines(lines = []) {
 }
 
 function isDate(text) {
-  return /20\d{2}[-=./:]\d{1,2}[-=./:]\d{1,3}/.test(String(text));
+  return /20\d{2}(?:[-=./:]?\d{1,2}[-=./:]\d{1,3}|[-=./:]\d{2}[1Il]\d{2})/.test(String(text));
 }
 
 export function spatialText(result) {
@@ -84,7 +85,11 @@ export function spatialText(result) {
   );
   const watermarkSet = new Set(watermark);
   const scene = lines.filter((line) => !watermarkSet.has(line));
-  const time = clockFromLines(result.timeLines) || clockFromLines(watermark);
+  // The detector sees the complete timestamp next to the watermark date. The
+  // direct clock crop is deliberately wider to tolerate older layouts, but on
+  // current photos it can include the date/weather row and hallucinate a
+  // different hour. Treat it as a fallback only.
+  const time = clockFromLines(watermark) || clockFromLines(result.timeLines);
   return [
     ...(time ? [time] : []),
     date.text,
@@ -189,11 +194,22 @@ export async function recognizePpOcrImage(imagePath, { root = path.resolve(".") 
 }
 
 export function formatPpOcrResult(result) {
+  const lines = Array.isArray(result.lines) ? result.lines : [];
+  const date = lines
+    .filter((line) => isDate(line.text))
+    .sort((left, right) => right.score - left.score)[0];
+  const watermarkLines = date && result.width && result.height
+    ? lines.filter((line) =>
+      line.x < result.width * 0.72
+      && line.y >= date.y - result.height * 0.055
+      && line.y <= result.height * 0.995
+    )
+    : [];
   return {
     ok: true,
     engine: result.engine,
     ocrText: spatialText(result),
-    timeOcrText: clockFromLines(result.timeLines),
+    timeOcrText: clockFromLines(watermarkLines) || clockFromLines(result.timeLines),
     confidence: Number(result.confidence) || 0,
     geometry: {
       width: result.width,

@@ -54,9 +54,11 @@ function validPlan() {
           checkEndTime: "2026-07-26 11:41:00",
           checkCategory: "category-1",
           checkType: "公路路面、公路附属设施、公路用地及建筑控制区监管",
+          address: "韵家口大队",
           cateId: "1002000100000000",
           cateName: "公路路政",
           roadCondition: "1",
+          drivingDirection: "全程",
           roadNum: "G6",
           roadName: "京藏高速公路西过境段",
           describes: "巡查西过境段，沿线道路及附属设施正常。",
@@ -241,6 +243,8 @@ test("matches records across delimiter differences but not different route descr
     roadName: ["京藏高速公路西过境段"]
   };
   assert.equal(recordEquivalent(existing, payload), true);
+  assert.equal(recordEquivalent({ ...existing, address: "" }, payload), false);
+  assert.equal(recordEquivalent({ ...existing, drivingDirection: "" }, payload), false);
   assert.equal(
     recordEquivalent({ ...existing, describes: "另一条线路" }, payload),
     false
@@ -520,6 +524,34 @@ test("autoLogin switches an authenticated session when another account is select
   );
   assert.equal(logoutCalls, 1);
   assert.equal(official.pendingUsername, "李彩燕");
+});
+
+test("autoLogin returns an existing matching session without creating or reloading a window", async () => {
+  class MustNotCreateWindow {
+    constructor() {
+      throw new Error("window must not be created");
+    }
+  }
+  const official = new OfficialSession({
+    BrowserWindow: MustNotCreateWindow,
+    logger: { log() {}, error() {} }
+  });
+  let statusCalls = 0;
+  official.status = async (options) => {
+    statusCalls += 1;
+    assert.equal(options.createWindow, false);
+    return {
+      ok: true,
+      authenticated: true,
+      serviceReady: true,
+      loginRequired: false,
+      username: "李彩燕"
+    };
+  };
+
+  const result = await official.autoLogin("李彩燕", "secret");
+  assert.equal(result.username, "李彩燕");
+  assert.equal(statusCalls, 1);
 });
 
 test("logout revokes the official session, clears token cookies and verifies signed-out state", async () => {

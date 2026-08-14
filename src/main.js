@@ -63,6 +63,7 @@ import "./styles.css";
 
 const OFFICIAL_URL = "http://110.167.233.70:8084/#/dutyRecord";
 const DEFAULT_CREDENTIAL_USER = "李彩燕";
+const CREDENTIAL_PREFERENCE_KEY = "qh-patrol:last-credential-user";
 const ROUTE_KEYS = Object.keys(ROUTES);
 const ROUTE_BADGES = { g6: "G6", west: "G6 西过境", s101: "S101" };
 const PERSONNEL = Object.keys(OFFICIAL_PERSONNEL);
@@ -82,6 +83,24 @@ const WORKFLOW_STEPS = [
   ["submit", "新增 / 复用"],
   ["readback", "回读校验"]
 ];
+
+function storedCredentialUser() {
+  try {
+    return String(window.localStorage.getItem(CREDENTIAL_PREFERENCE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function rememberCredentialUser(username) {
+  const value = String(username || "").trim();
+  if (!value) return;
+  try {
+    window.localStorage.setItem(CREDENTIAL_PREFERENCE_KEY, value);
+  } catch {
+    // A disabled storage backend must not block login.
+  }
+}
 
 function chinaDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -108,7 +127,7 @@ const state = {
   confirmedCondition: "畅通",
   // 自动登录
   credentialUsers: [],
-  selectedCredentialUser: "",
+  selectedCredentialUser: storedCredentialUser(),
   autoLoggingIn: false,
   loggingOut: false,
   autoLoginError: "",
@@ -1085,6 +1104,7 @@ async function refreshDesktopStatus() {
         && state.credentialUsers.includes(state.desktopStatus.username)
       ) {
         state.selectedCredentialUser = state.desktopStatus.username;
+        rememberCredentialUser(state.selectedCredentialUser);
       }
       await synchronizeOfficialPersonnel();
     }
@@ -1106,6 +1126,7 @@ async function loadCredentialUsers() {
         && state.credentialUsers.includes(state.desktopStatus.username)
       ) {
         state.selectedCredentialUser = state.desktopStatus.username;
+        rememberCredentialUser(state.selectedCredentialUser);
       } else if (state.credentialUsers.length > 0 && !state.selectedCredentialUser) {
         state.selectedCredentialUser = state.credentialUsers.includes(DEFAULT_CREDENTIAL_USER)
           ? DEFAULT_CREDENTIAL_USER
@@ -1129,6 +1150,7 @@ async function autoLogin() {
       if (result.username && state.credentialUsers.includes(result.username)) {
         state.selectedCredentialUser = result.username;
       }
+      rememberCredentialUser(state.selectedCredentialUser);
       await synchronizeOfficialPersonnel();
       addActivity(`已自动登录为 ${result.username || state.selectedCredentialUser}`, "success");
     } else {
@@ -1859,6 +1881,7 @@ function bind() {
   $("#credential-select")?.addEventListener("change", async (event) => {
     const previousUsername = state.desktopStatus?.username || "";
     state.selectedCredentialUser = event.target.value;
+    rememberCredentialUser(state.selectedCredentialUser);
     render();
     if (
       state.desktopStatus?.authenticated

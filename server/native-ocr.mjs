@@ -5,7 +5,7 @@ import {
   resetPpOcrWasmForTests
 } from "./ppocrv6-wasm.mjs";
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const SUPPORTED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 
 function nativeOcrError(code, message) {
@@ -43,7 +43,7 @@ function decodeImage(input) {
   }
   const buffer = Buffer.from(input.dataBase64, "base64");
   if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) {
-    throw nativeOcrError("INVALID_OCR_IMAGE", "OCR图片大小无效或超过5MB");
+    throw nativeOcrError("INVALID_OCR_IMAGE", "OCR图片大小无效或超过20MB");
   }
   if (detectMime(buffer) !== mimeType) {
     throw nativeOcrError("INVALID_OCR_IMAGE", "OCR图片内容与类型不一致");
