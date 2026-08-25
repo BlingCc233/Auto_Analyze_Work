@@ -79,9 +79,27 @@ async function withServer(options, action) {
   try {
     return await action(local);
   } finally {
-    await closeServer(local.server);
+    await local.close();
   }
 }
+
+test("close drains active local sockets and is idempotent", async () => {
+  const fixture = await createFixture();
+  const local = await startLocalServer({
+    appRoot: fixture.appRoot,
+    dailyRoot: fixture.dailyRoot,
+    port: 0
+  });
+  try {
+    const response = await rawRequest(`${local.url}/`);
+    assert.equal(response.status, 200);
+    await Promise.all([local.close(), local.close()]);
+    assert.equal(local.server.listening, false);
+  } finally {
+    if (local.server.listening) await closeServer(local.server);
+    await fixture.cleanup();
+  }
+});
 
 test("uses the external Resources directory as the packaged OCR runtime root", () => {
   const resources = join(tmpdir(), "Patrol.app", "Contents", "Resources");

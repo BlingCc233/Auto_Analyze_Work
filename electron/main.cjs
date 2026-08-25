@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, session } = require("electron");
 const { join } = require("node:path");
+const { createAppLifecycle } = require("./app-lifecycle.cjs");
 const { startLocalServer } = require("./local-server.cjs");
 const {
   OfficialSession,
@@ -18,7 +19,15 @@ app.commandLine.appendSwitch("disable-gpu-compositing");
 let workbench;
 let officialSession;
 let localServer;
-let quitting = false;
+
+const lifecycle = createAppLifecycle({
+  app,
+  BrowserWindow,
+  disposeOfficialSession: () => officialSession?.dispose(),
+  closeLocalServer: () => localServer?.close?.(),
+  logger: console
+});
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function redactLog(value) {
   return safeError(new Error(String(value))).message;
@@ -145,6 +154,7 @@ async function createWorkbenchWindow() {
   workbench.once("ready-to-show", () => {
     if (workbench && !workbench.isDestroyed()) workbench.show();
   });
+  workbench.on("close", lifecycle.handleMainWindowClose);
   workbench.on("closed", () => {
     workbench = null;
   });
@@ -242,7 +252,9 @@ function registerOfficialHandlers() {
   registerHandler("official-logout", () => officialSession.logout());
 }
 
-app.whenReady().then(async () => {
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else app.whenReady().then(async () => {
   const appRoot = app.isPackaged ? app.getAppPath() : join(__dirname, "..");
   const dailyRoot = app.isPackaged
     ? join(app.getPath("documents"), "韵家口巡查工作台", "daily")
@@ -265,6 +277,11 @@ app.whenReady().then(async () => {
     BrowserWindow,
     logger: console
   });
+  const officialWarmup = officialSession.ensureWindow({ show: false }).then(
+    () => officialSession._waitForLoginForm(15000)
+  ).catch((error) => {
+    console.warn("[main] official login warmup failed", redactLog(error?.message || error));
+  });
   registerOfficialHandlers();
   await createWorkbenchWindow();
 
@@ -273,16 +290,19 @@ app.whenReady().then(async () => {
   if (autoTestUser) {
     const username = autoTestUser.split('=')[1];
     console.log(`[main] AUTO-TEST mode: auto-login as "${username}"`);
-    setTimeout(async () => {
+    setImmediate(async () => {
       try {
+        await officialWarmup;
         const cred = findCredentials(username);
         if (!cred) {
           console.log('[main] AUTO-TEST: user not found');
           return;
         }
         console.log(`[main] AUTO-TEST: starting autoLogin for ${cred.username}...`);
+        const startedAt = Date.now();
         const result = await officialSession.autoLogin(cred.username, cred.password);
-        console.log(`[main] AUTO-TEST: result authenticated=${result?.authenticated} serviceReady=${result?.serviceReady}`);
+        const elapsedMs = result?.loginElapsedMs ?? Date.now() - startedAt;
+        console.log(`[main] AUTO-TEST: result authenticated=${result?.authenticated} serviceReady=${result?.serviceReady} elapsedMs=${elapsedMs}`);
         if (result?.authenticated) {
           console.log('[main] AUTO-TEST: SUCCESS - login succeeded!');
           app.exit(0);
@@ -294,7 +314,7 @@ app.whenReady().then(async () => {
         console.log(`[main] AUTO-TEST: ERROR - ${e.message}`);
         app.exit(2);
       }
-    }, 3000); // 等3秒让窗口初始化完成
+    });
   }
 
   app.on("activate", () => {
@@ -308,14 +328,17 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && !lifecycle.isShuttingDown()) app.quit();
 });
 
-app.on("before-quit", () => {
-  if (quitting) return;
-  quitting = true;
-  officialSession?.dispose();
-  localServer?.server.close();
+app.on("before-quit", lifecycle.handleBeforeQuit);
+
+app.on("second-instance", () => {
+  if (workbench && !workbench.isDestroyed()) {
+    if (workbench.isMinimized()) workbench.restore();
+    workbench.show();
+    workbench.focus();
+  }
 });
 
 process.on("unhandledRejection", (error) => {

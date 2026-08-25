@@ -572,7 +572,7 @@ export function buildOfficialSubmitPlan({
       schedulePersonnelId: OFFICIAL_PERSONNEL[OFFICIAL_PROFILE.scheduler].personId,
       patrolRoute: api.patrolRoute,
       times: Number(existingSchedule?.times) || 1,
-      content: existingSchedule?.content || api.scheduleContent,
+      content: existingSchedule?.content || draft.focus || api.scheduleContent,
       oid: OFFICIAL_PROFILE.oid,
       approve: existingSchedule?.approve ?? "",
       ...(existingSchedule ? { scheduleId: existingSchedule.scheduleId } : {})
@@ -598,7 +598,7 @@ export function buildOfficialSubmitPlan({
       checkStartTime: draft.startTime,
       checkEndTime: draft.endTime,
       checkCategory: OFFICIAL_PROFILE.checkCategory,
-      checkType: existingRecord?.checkType || OFFICIAL_PROFILE.checkType,
+      checkType: existingRecord?.checkType || draft.checkType || OFFICIAL_PROFILE.checkType,
       address: OFFICIAL_PROFILE.address,
       cateId: OFFICIAL_PROFILE.cateId,
       cateName: OFFICIAL_PROFILE.cateName,

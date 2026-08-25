@@ -23,6 +23,7 @@ export const ROUTES = {
       ["朝阳立交", "K1800+500m"],
       ["柴达木路高速路口", ""],
       ["西宁东收费口", ""],
+      ["事故处理点", ""],
       ["施工监管点", ""],
       ["治超点", ""]
     ]
@@ -40,7 +41,9 @@ export const ROUTES = {
       ["西宁西收费站", "K1836+700m"],
       ["西钢出口", "K1816+500m"],
       ["西过境出口", ""],
-      ["朝阳立交", "K1800+500m"]
+      ["朝阳立交", "K1800+500m"],
+      ["事故处理点", ""],
+      ["施工监管点", ""]
     ]
   },
   s101: {
@@ -57,6 +60,7 @@ export const ROUTES = {
       ["互助南收费站", "K27+000m"],
       ["互助东收费站", "K32+500m"],
       ["互助匝道出口", ""],
+      ["事故处理点", ""],
       ["施工监管点", ""]
     ]
   }
@@ -85,7 +89,7 @@ const PLACE_RULES = [
   { id: "g6-overload-visual", name: "治超点", semanticPoint: "海东主线收费站治超点", routeKey: "g6", routeOptions: ["g6", "west"], order: 7, match: /总质量|栏板高度|领航版|国六/, score: 74, attachmentName: "治超.jpg", event: "overload", shared: true },
 
   { id: "west-entry", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /生物园|生美园|生韵国区|海湖路.*G6.*入口/, score: 97, attachmentName: "高速入口.jpg" },
-  { id: "west-entry-poi", name: "高速入口", semanticPoint: "西过境段高速入口（同仁路口/万方城）", routeKey: "west", order: 1, match: /万方城/, score: 78, attachmentName: "高速入口.jpg" },
+  { id: "west-entry-poi", name: "高速入口", semanticPoint: "朝阳互通共用高速入口（同仁路口/万方城）", routeKey: "west", routeOptions: ["g6", "west"], order: 1, match: /万方城/, score: 78, attachmentName: "高速入口.jpg", shared: true },
   { id: "west-diverge-s1113", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 1, match: /S1113宁贵高速.*(?:湟源|兰州)|(?:湟源|兰州).{0,40}S1113宁贵高速/, score: 99, attachmentName: "西宁西方向.jpg" },
   { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|西宁北站|湟源.*格尔木.*门源|门源.*湟源.*格尔木|西钢.*大通|西宁城区.*海湖大道.*西钢.*多巴/, score: 98, attachmentName: "西宁西方向.jpg" },
   { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大[酉西面]山.*[隧腿]道|万佳家博园|天津路|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
@@ -101,7 +105,7 @@ const PLACE_RULES = [
   { id: "s101-tangchuan", name: "塘川收费站", semanticPoint: "塘川收费站", routeKey: "s101", order: 3, match: /塘川.*收费/, score: 99, attachmentName: "塘川收费站.jpg" },
   { id: "s101-south", name: "互助南收费站", semanticPoint: "互助南收费站", routeKey: "s101", order: 4, match: /互助南.*收费|彩虹大道/, score: 99, attachmentName: "互助南收费站.jpg" },
   { id: "s101-east", name: "互助东收费站", semanticPoint: "互助东收费站", routeKey: "s101", order: 5, match: /互?助东.*收费|251县道|定安东路/, score: 99, attachmentName: "互助东收费站.jpg" },
-  { id: "s101-exit", name: "互助匝道出口", semanticPoint: "S101韵家口端出口匝道", routeKey: "s101", order: 6, match: /互助匝道.*出口|出S101|韵家口高架桥|互助收费站.*S101.*南|Lan\s*zhou.*韵家口/i, score: 100, attachmentName: "互助匝道出口.jpg" },
+  { id: "s101-exit", name: "互助匝道出口", semanticPoint: "S101韵家口端出口匝道", routeKey: "s101", order: 6, match: /互助匝道.*出口|出S101|韵家口高架桥|互助收费站.*S101.*南/i, score: 100, attachmentName: "互助匝道出口.jpg" },
   { id: "s101-construction", name: "施工监管点", semanticPoint: "互助南收费站匝道余家村施工点", routeKey: "s101", order: 5, match: /余家村/, score: 99, attachmentName: "施工监管.jpg", event: "construction" }
 ];
 
@@ -363,6 +367,13 @@ function attachmentNameForCandidate(candidate) {
   return candidate?.attachmentName ?? (candidate ? `${candidate.name}.jpg` : "");
 }
 
+function eventFromText(source = "") {
+  if (/交通事故|事故现场|碰撞|追尾|侧翻|车辆抛锚|路产损失|应急处置/.test(source)) return "accident";
+  if (/施工监管|绿化作业|养护作业|规范摆放警示|作业安全|施工现场/.test(source)) return "construction";
+  if (/治超|超限治理|检测站|核查货运|货运车辆/.test(source)) return "overload";
+  return "";
+}
+
 function sourceSeriesFromFileName(fileName) {
   const baseName = String(fileName).split(/[\\/]/).at(-1) || "";
   const wechat = baseName.match(/^微信图片_\d{14}_(\d+)_([^_.]+)\.[^.]+$/);
@@ -521,7 +532,14 @@ export function classifyImage({ fileName, ocrText = "", timeOcrText = "" }) {
   const trustedHistoricalSample = sameHistoricalDay
     || legacyHistoricalSample
     || exactHistoricalSample;
+  const mayUseHistoricalCandidate = trustedHistoricalSample || Boolean(
+    historical
+    && historical.score >= 0.97
+    && historical.margin >= 0.08
+    && (!ruleCandidate || ruleCandidate.score < 82)
+  );
   const historicalCandidate = historical
+    && mayUseHistoricalCandidate
     && historical.include !== false
     && historical.score >= 0.94
     ? {
@@ -537,12 +555,15 @@ export function classifyImage({ fileName, ocrText = "", timeOcrText = "" }) {
         ? "施工监管.jpg"
         : historical.event === "overload"
           ? "治超.jpg"
+          : historical.event === "accident"
+            ? "事故现场.jpg"
           : `${historical.place || "连接节点"}.jpg`,
       event: historical.event
     }
     : null;
   const candidate = historicalCandidate ?? ruleCandidate;
   const candidates = historicalCandidate ? [historicalCandidate, ...ruleCandidates] : ruleCandidates;
+  const detectedEvent = candidate?.event || eventFromText(source);
   const transit = TRANSIT_RULES.some((rule) => rule.test(source));
   const parsedTime = timeFromOcrEvidence(ocrText, timeOcrText);
   const time = historical?.exact && historical.expectedTime
@@ -619,7 +640,7 @@ export function classifyImage({ fileName, ocrText = "", timeOcrText = "" }) {
     sequence: candidate?.order ?? null,
     time,
     weather: weatherFromOcr(ocrText),
-    event: candidate?.event ?? "",
+    event: detectedEvent,
     historyRecordHint: trustedHistoricalSample ? historical?.recordHint ?? "" : "",
     historySessionHint: trustedHistoricalSample ? historical?.sessionHint ?? "" : "",
     sequenceHint: trustedHistoricalSample ? historical?.sequenceHint ?? null : null,
@@ -675,10 +696,12 @@ function suffixName(name, count) {
 }
 
 function normalizedNameBase(photo) {
-  if (photo.nameBase) return photo.nameBase;
+  if (photo.manualName && photo.nameBase) return photo.nameBase;
+  if (photo.event === "accident") return "事故现场";
   if (photo.event === "construction") return "施工监管";
   if (photo.event === "overload") return "治超";
   if (photo.event === "facility-survey") return "路域设施勘察";
+  if (photo.nameBase) return photo.nameBase;
   const aliases = {
     "海东收费站入口": "海东主线收费站",
     "海东收费站出口": "海东主线收费站",
@@ -821,6 +844,24 @@ function routeContextScores(photos) {
   return { windows, anchors, anchorCounts };
 }
 
+function seriesTopologyRoute(photos, context) {
+  const usable = photos.filter((photo) => !photo.duplicateOf && !photo.verifiedHistoricalExclusion);
+  const source = normalizeText(usable.map((photo) => photo.ocrText || "").join("\n"));
+  const anchoredRoutes = Object.entries(context.anchorCounts)
+    .filter(([, count]) => count > 0)
+    .map(([routeKey]) => routeKey);
+  if (anchoredRoutes.length > 1) return "";
+  const hasWestAnchor = /大[酉西面]山|西宁西.*收费|西宁特殊钢|西钢|西过境.*出口/.test(source);
+  const hasS101Anchor = /互助(?:主线|南|东).*收费|塘川.*收费/.test(source);
+  const hasG6Trajectory = /海东(?:市|收费)|平安区|曹家堡|西宁东.*收费/.test(source);
+
+  if (hasWestAnchor && !hasS101Anchor) return "west";
+  if (hasS101Anchor && !hasWestAnchor) return "s101";
+  if (hasG6Trajectory && !hasWestAnchor && !hasS101Anchor) return "g6";
+
+  return anchoredRoutes.length === 1 ? anchoredRoutes[0] : dominantContextRoute(context);
+}
+
 function dominantContextRoute(context) {
   const routes = Object.entries(context.anchorCounts)
     .filter(([, count]) => count > 0)
@@ -941,7 +982,7 @@ function assignPatrolGroups(photos) {
     );
     const series = new Map();
     for (const photo of routeEntries) {
-      const key = photo.contextBatch || photo.sourceSeries || "unsequenced";
+      const key = photo.sourceSeries || photo.contextBatch || "unsequenced";
       if (!series.has(key)) series.set(key, []);
       series.get(key).push(photo);
     }
@@ -961,9 +1002,8 @@ function assignPatrolGroups(photos) {
         const gap = minutes(photo.time) - minutes(previous.time);
         const resetAtStart = gap > 75
           && current.length >= 2
-          && SESSION_START_PLACES[routeKey].has(photo.place)
-          && SESSION_START_PLACES[routeKey].has(previous.place);
-        if (gap > 180 || resetAtStart) seriesSessions.push([photo]);
+          && SESSION_START_PLACES[routeKey].has(photo.place);
+        if (gap > 360 || resetAtStart) seriesSessions.push([photo]);
         else current.push(photo);
       }
       seriesSessions.forEach((session, index) => {
@@ -1364,7 +1404,7 @@ function refineG6Turnarounds(photos) {
   const groups = new Map();
   for (const photo of result) {
     if (photo.routeKey !== "g6" || photo.include === false) continue;
-    const key = photo.contextBatch || photo.sourceSeries || "unsequenced";
+    const key = photo.sourceSeries || photo.contextBatch || "unsequenced";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(photo);
   }
@@ -1374,9 +1414,112 @@ function refineG6Turnarounds(photos) {
     "海东收费站出口",
     "西宁东收费口"
   ]);
-  for (const entries of groups.values()) {
-    entries.sort(compareContextPhotos);
-    for (let index = 1; index < entries.length - 1; index += 1) {
+  const isStartEvidence = (photo) => ["同仁路口驶入高速", "高速入口"].includes(photo.place)
+    || /同仁路口.*(?:驶入|进入)|驶入高速|万方城/.test(normalizeText(photo.ocrText));
+  const isGeneric = (photo) => !photo.manualAssignment
+    && !photo.historyRecordHint
+    && ["连接/待确认节点", "待确认地点", "待路径归集", "高速入口"].includes(photo.place);
+  const setHaidong = (photo, direction = "") => setTopologyPoint(photo, {
+    pointId: "g6-haidong",
+    place: "海东主线收费站",
+    semanticPoint: `海东主线收费站${direction ? `（${direction}）` : ""}`,
+    sequence: direction === "西宁方向" ? 12 : 7
+  });
+
+  for (const allEntries of groups.values()) {
+    allEntries.sort(compareContextPhotos);
+    const sourceSeries = allEntries[0]?.sourceSeries || "";
+    const mixedRouteSeries = Boolean(sourceSeries && result.some((photo) =>
+      photo.sourceSeries === sourceSeries
+      && photo.include !== false
+      && photo.routeKey
+      && photo.routeKey !== "g6"
+    ));
+    const sessions = [];
+    for (const photo of allEntries) {
+      const current = sessions.at(-1);
+      const previous = current?.at(-1);
+      const gap = previous ? minutes(photo.time) - minutes(previous.time) : 0;
+      if (current && gap > 75 && isStartEvidence(photo)) sessions.push([photo]);
+      else if (current) current.push(photo);
+      else sessions.push([photo]);
+    }
+
+    for (const entries of sessions) {
+      if (
+        !mixedRouteSeries
+        && entries.length >= 2
+        && !entries[0].historyRecordHint
+        && isStartEvidence(entries[0])
+      ) {
+        setTopologyPoint(entries[0], {
+          pointId: "g6-entry",
+          place: "同仁路口驶入高速",
+          semanticPoint: "朝阳互通立交（同仁路口驶入高速）",
+          sequence: 1
+        });
+      }
+
+      const terminalIndex = entries.findIndex((photo, index) =>
+        index > 0
+        && (photo.place === "柴达木路高速路口" || /柴达木|同仁路口.*离开/.test(normalizeText(photo.ocrText)))
+      );
+      const endIndex = terminalIndex >= 0 ? terminalIndex : entries.length;
+      const interior = entries.slice(1, endIndex);
+      for (let index = 1; index < entries.length - 1; index += 1) {
+        const photo = entries[index];
+        const previous = entries[index - 1];
+        const next = entries[index + 1];
+        if (!isGeneric(photo) || !mainlineTolls.has(previous.place) || !mainlineTolls.has(next.place)) continue;
+        const previousAt = minutes(previous.time);
+        const at = minutes(photo.time);
+        const nextAt = minutes(next.time);
+        if (
+          !Number.isFinite(previousAt)
+          || !Number.isFinite(at)
+          || !Number.isFinite(nextAt)
+          || at <= previousAt
+          || at >= nextAt
+          || nextAt - previousAt > 40
+        ) continue;
+        setTopologyPoint(photo, {
+          pointId: "g6-pingan",
+          place: "平安收费站",
+          semanticPoint: "平安收费站调头",
+          sequence: 11
+        });
+      }
+      const pinganIndex = interior.findIndex((photo) => photo.place === "平安收费站");
+      const haidongIndexes = interior
+        .map((photo, index) => ["海东主线收费站", "海东收费站入口", "海东收费站出口"].includes(photo.place) ? index : -1)
+        .filter((index) => index >= 0);
+
+      if (!mixedRouteSeries && pinganIndex >= 0) {
+        const outbound = interior.slice(0, pinganIndex).findLast(isGeneric);
+        const returning = interior.slice(pinganIndex + 1).find(isGeneric);
+        if (outbound) setHaidong(outbound, "平安方向");
+        if (returning) setHaidong(returning, "西宁方向");
+      } else if (!mixedRouteSeries) {
+        const firstHaidongIndex = haidongIndexes[0] ?? -1;
+        const candidates = interior
+          .map((photo, index) => ({ photo, index }))
+          .filter(({ photo, index }) => isGeneric(photo) && index !== firstHaidongIndex);
+        if (firstHaidongIndex < 0 && candidates.length) {
+          setHaidong(candidates.shift().photo, "平安方向");
+        }
+        if (candidates.length) {
+          const pingan = candidates.shift().photo;
+          setTopologyPoint(pingan, {
+            pointId: "g6-pingan",
+            place: "平安收费站",
+            semanticPoint: "平安收费站调头",
+            sequence: 11
+          });
+        }
+        if (candidates.length) setHaidong(candidates.shift().photo, "西宁方向");
+      }
+
+      for (let index = 1; index < entries.length - 1; index += 1) {
       const photo = entries[index];
       const previous = entries[index - 1];
       const next = entries[index + 1];
@@ -1405,6 +1548,7 @@ function refineG6Turnarounds(photos) {
         sequence: 11
       });
       photo.reason = `照片位于${previous.place}与${next.place}两次主线收费站拍摄之间，按G6东行至平安调头后原路返回的拓扑自动确认为平安收费站。`;
+      }
     }
   }
   return result;
@@ -1547,6 +1691,8 @@ export function resolvePhotoAssignments(photos) {
   );
   const globalContext = routeContextScores(classified);
   const contexts = new Map();
+  const seriesContexts = new Map();
+  const seriesRoutes = new Map();
   for (const photo of classified) {
     const contextKey = photo.contextBatch || photo.sourceSeries;
     if (!contextKey || contexts.has(contextKey)) continue;
@@ -1556,11 +1702,18 @@ export function resolvePhotoAssignments(photos) {
         (item.contextBatch || item.sourceSeries) === contextKey
       ))
     );
+    if (photo.sourceSeries && !seriesContexts.has(photo.sourceSeries)) {
+      const seriesPhotos = classified.filter((item) => item.sourceSeries === photo.sourceSeries);
+      const seriesContext = routeContextScores(seriesPhotos);
+      seriesContexts.set(photo.sourceSeries, seriesContext);
+      seriesRoutes.set(photo.sourceSeries, seriesTopologyRoute(seriesPhotos, seriesContext));
+    }
   }
 
   classified = classified.map((photo, index) => {
     if (photo.duplicateOf) return photo;
     if (photo.verifiedHistoricalExclusion) return { ...photo, include: false };
+    const seriesRoute = photo.sourceSeries ? seriesRoutes.get(photo.sourceSeries) || "" : "";
     if (photo.manualAssignment) {
       return {
         ...photo,
@@ -1569,19 +1722,29 @@ export function resolvePhotoAssignments(photos) {
           && photo.include !== false
       };
     }
-    if (photo.routeKey && !photo.shared && (photo.score ?? 0) >= 82) {
+    if (
+      photo.routeKey
+      && !photo.shared
+      && (photo.score ?? 0) >= 82
+      && (photo.historyRecordHint || !seriesRoute || seriesRoute === photo.routeKey)
+    ) {
       return { ...photo, include: true };
     }
     const contextKey = photo.contextBatch || photo.sourceSeries;
-    const context = contexts.get(contextKey) || globalContext;
-    const contextPhotos = (contextKey
-      ? classified.filter((item) =>
-        (item.contextBatch || item.sourceSeries) === contextKey
-      )
-      : [...classified]
+    const useSeriesContext = Boolean(seriesRoute && photo.sourceSeries);
+    const context = useSeriesContext
+      ? seriesContexts.get(photo.sourceSeries)
+      : contexts.get(contextKey) || globalContext;
+    const contextPhotos = (useSeriesContext
+      ? classified.filter((item) => item.sourceSeries === photo.sourceSeries)
+      : contextKey
+        ? classified.filter((item) =>
+          (item.contextBatch || item.sourceSeries) === contextKey
+        )
+        : [...classified]
     ).sort(compareContextPhotos);
     const contextIndex = contextPhotos.findIndex((item) => item.sourceIndex === photo.sourceIndex);
-    const dominantRoute = dominantContextRoute(context);
+    const dominantRoute = seriesRoute || dominantContextRoute(context);
     const { best, second } = bestContextRoute(
       photo,
       contextPhotos,
@@ -1590,14 +1753,35 @@ export function resolvePhotoAssignments(photos) {
     );
     const margin = best.score - (second?.score ?? 0);
     const withinPatrol = Number.isFinite(best.timeDistance) && best.timeDistance <= 35;
-    const routeKey = dominantRoute && best.score < 70 ? dominantRoute : best.routeKey;
+    const adjacentRouteCandidate = photo.shared
+      ? [
+        ...contextPhotos.slice(contextIndex + 1),
+        ...contextPhotos.slice(0, contextIndex).reverse()
+      ].find((neighbor) =>
+        neighbor.sourceSeries === photo.sourceSeries
+        && neighbor.routeKey
+        && !neighbor.shared
+        && (neighbor.score ?? 0) >= 82
+        && Number.isFinite(neighbor.captureOrder)
+        && Number.isFinite(photo.captureOrder)
+        && Math.abs(neighbor.captureOrder - photo.captureOrder) <= 2
+      )?.routeKey || ""
+      : "";
+    const adjacentExclusiveRoute = adjacentRouteCandidate && adjacentRouteCandidate !== best.routeKey
+      ? adjacentRouteCandidate
+      : "";
+    const routeKey = seriesRoute
+      || adjacentExclusiveRoute
+      || (dominantRoute && best.score < 70 ? dominantRoute : best.routeKey);
     const routeWindow = context.windows[routeKey];
     const routeDistance = timeDistanceToWindow(photo, routeWindow);
     const dominantWindowMatch = dominantRoute === routeKey
       && context.anchorCounts[routeKey] >= 2
       && (!Number.isFinite(routeDistance) || routeDistance <= 360);
-    const attachable = (best.score >= 72 && (margin >= 7 || dominantRoute === routeKey) || dominantWindowMatch)
-      && (!photo.transit || dominantWindowMatch || routeDistance <= 35);
+    const attachable = (Boolean(seriesRoute)
+      || best.score >= 72 && (margin >= 7 || dominantRoute === routeKey)
+      || dominantWindowMatch)
+      && (!photo.transit || Boolean(seriesRoute) || dominantWindowMatch || routeDistance <= 35);
 
     if (!attachable) {
       const excluded = photo.transit && (!Number.isFinite(routeDistance) || routeDistance > 60);
@@ -1618,6 +1802,8 @@ export function resolvePhotoAssignments(photos) {
         ? "治超点"
         : photo.event === "construction"
           ? "施工监管点"
+          : photo.event === "accident"
+            ? "事故处理点"
           : "连接/待确认节点"
       : photo.place;
     let pointId = photo.pointId;
@@ -1650,12 +1836,18 @@ export function resolvePhotoAssignments(photos) {
       nameBase,
       shared,
       include: true,
-      confidence: topologyConfirmed
+      confidence: adjacentExclusiveRoute
         ? "topology"
+        : topologyConfirmed
+          ? photo.pointId?.startsWith("g6-haidong") && (photo.score ?? 0) >= 94
+            ? "high"
+            : "topology"
         : photo.shared || photo.transit || !photo.pointId
           ? "context"
           : margin >= 18 && (withinPatrol || dominantRoute === routeKey) ? "high" : "context",
-      reason: topologyConfirmed
+      reason: adjacentExclusiveRoute
+        ? `根据紧邻的${ROUTES[adjacentExclusiveRoute].label}唯一点位和拍摄顺序自动确认。`
+        : topologyConfirmed
         ? `根据${ROUTES[routeKey].label}同批次已验证点位、相邻图片与拍摄时序自动确认。`
         : routeChanged || photo.shared || photo.transit
         ? `根据${ROUTES[routeKey].label}的唯一点位、相邻图片与拍摄时序自动归集（路线优势 ${Math.round(margin)} 分）。`
@@ -1715,7 +1907,12 @@ function checkpointMarker(route, place) {
   return route.checkpoints.find(([name]) => name === place)?.[1] ?? "";
 }
 
-function standardConclusion(route, confirmedCondition) {
+function standardConclusion(route, confirmedCondition, hasEvents = false) {
+  if (hasEvents) {
+    return confirmedCondition === "畅通"
+      ? "上述事故处理、施工监管或专项巡查事项已按现场情况登记；除上述已记录事项外，巡查结束时已核验路段通行秩序正常。"
+      : "上述事故处理、施工监管或专项巡查事项及处置结果以现场核验登记为准；未拍摄路段情况需由提交人确认。";
+  }
   const condition = confirmedCondition === "畅通"
     ? "巡查期间，该路段公路、公路用地及其附属设施外观状况完好，未发现明显影响公路通行安全的路面障碍物，所辖收费站、匝道及隧道通行秩序正常，未发现异常情况。"
     : "已核验点位的现场情况见上述记录；全线通行状态及未拍摄路段需由提交人现场确认。";
@@ -1730,6 +1927,7 @@ function cnTime(value) {
 }
 
 function eventLine(photo) {
+  if (photo.event === "accident") return `${cnTime(photo.time)}巡查至${photo.place}，发现交通事故并开展现场安全警戒和处置；人员伤亡、路产损失及恢复通行情况以现场核验登记为准。`;
   if (photo.event === "construction") return `${cnTime(photo.time)}巡查至${photo.place}，对现场作业开展施工监管，作业安全措施及通行组织以现场核验结果为准。`;
   if (photo.event === "overload") return `${cnTime(photo.time)}巡查至${photo.place}，开展超限治理相关巡查，检查情况以现场登记为准。`;
   if (photo.event === "facility-survey") return `${cnTime(photo.time)}对沿线路域环境、桥下空间及公路附属设施开展现场勘察，未发现异常情况。`;
@@ -1780,7 +1978,7 @@ function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondit
   lines.push(exitedRoute
     ? `${cnTime(endTime)}返回大队，巡查结束。`
     : `${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
-  lines.push(standardConclusion(route, confirmedCondition));
+  lines.push(standardConclusion(route, confirmedCondition, photos.some((photo) => photo.event)));
   return lines.join("\n");
 }
 
@@ -1812,7 +2010,7 @@ export function buildNarrative({ routeKey, startTime, endTime, photos, confirmed
     }
   }
   lines.push(`${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
-  lines.push(standardConclusion(route, confirmedCondition));
+  lines.push(standardConclusion(route, confirmedCondition, ordered.some((photo) => photo.event)));
   return lines.join("\n");
 }
 
@@ -1853,6 +2051,14 @@ export function buildJournalDraft({ date, drafts }) {
 export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTime, photos, confirmedCondition = "待确认" }) {
   const route = ROUTES[routeKey];
   const readiness = routeReadiness(routeKey, photos);
+  const eventTypes = [...new Set(readiness.included.map((photo) => photo.event).filter(Boolean))];
+  const eventLabels = eventTypes.map((event) => ({
+    accident: "事故处理",
+    construction: "施工监管",
+    overload: "超限治理",
+    "facility-survey": "路域设施勘察"
+  })[event]).filter(Boolean);
+  const baseFocus = "公路路面、公路附属设施、公路用地及建筑控制区监管";
   return {
     routeKey,
     date,
@@ -1860,7 +2066,10 @@ export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTi
     vehicle,
     officers,
     checkCategory: "公路路政巡查",
-    focus: "公路路面、公路附属设施、公路用地及建筑控制区监管",
+    checkType: "公路巡查",
+    focus: [baseFocus, ...eventLabels].join("；"),
+    eventTypes,
+    eventLabels,
     routeCode: route.code,
     roadName: route.roadName,
     startKilometer: route.start,
@@ -1876,6 +2085,7 @@ export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTi
       normalizedName: photo.proposedName,
       place: photo.place,
       time: photo.time,
+      event: photo.event || "",
       confidence: photo.confidence,
       reason: photo.reason
     })),

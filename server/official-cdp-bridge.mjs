@@ -10,7 +10,7 @@ const {
   sanitizeForRenderer
 } = require("../electron/official-session.cjs");
 
-const DEFAULT_CDP_ENDPOINT = "http://127.0.0.1:9333";
+const DEFAULT_CDP_ENDPOINT = "http://127.0.0.1:9222";
 const OFFICIAL_PAGE_PREFIX = `${OFFICIAL_ORIGIN}/`;
 
 function getJson(url) {

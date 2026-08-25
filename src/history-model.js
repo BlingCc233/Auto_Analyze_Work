@@ -48,10 +48,16 @@ const indexedKnowledge = knowledge.map((item) => ({
 export function matchHistoricalKnowledge(ocrText = "") {
   const normalizedText = normalizeKnowledgeText(ocrText);
   if (!normalizedText) return null;
+  const queryDate = String(ocrText)
+    .replace(/[=./:]/g, "-")
+    .match(/20\d{2}-\d{1,2}-\d{1,2}/)?.[0] ?? "";
   const tokens = ngrams(normalizedText);
   const matches = indexedKnowledge
     .map((item) => ({ item, score: similarity(tokens, item.tokens) }))
-    .sort((left, right) => right.score - left.score);
+    .sort((left, right) =>
+      right.score - left.score
+      || Number(right.item.date === queryDate) - Number(left.item.date === queryDate)
+    );
   const best = matches[0];
   if (!best || best.score < 0.9) return null;
   const second = matches[1];

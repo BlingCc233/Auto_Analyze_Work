@@ -46,6 +46,49 @@ test("uses OCR time and verified G6 image in the generated draft", () => {
   assert.equal(draft.routeCode, "G6");
 });
 
+test("recognizes accident handling and keeps the generated narrative factual", () => {
+  const classified = classifyImage({
+    fileName: "事故现场.jpg",
+    ocrText: "12:34 2026-08-16 西过境出口 交通事故 现场安全警戒 应急处置"
+  });
+  assert.equal(classified.event, "accident");
+
+  const draft = buildDraft({
+    date: "2026-08-16",
+    routeKey: "west",
+    vehicle: "青A33W69",
+    officers: ["李彩燕"],
+    startTime: "12:20",
+    endTime: "13:10",
+    confirmedCondition: "畅通",
+    photos: [{
+      originalName: "事故现场.jpg",
+      routeKey: "west",
+      place: "事故处理点",
+      time: "12:34",
+      event: "accident",
+      confidence: "high",
+      include: true
+    }]
+  });
+
+  assert.deepEqual(draft.eventTypes, ["accident"]);
+  assert.match(draft.focus, /事故处理/);
+  assert.match(draft.narrative, /开展现场安全警戒和处置/);
+  assert.match(draft.narrative, /人员伤亡、路产损失及恢复通行情况以现场核验登记为准/);
+  assert.doesNotMatch(draft.narrative, /未发现异常情况/);
+  assert.equal(draft.attachments[0].event, "accident");
+});
+
+test("recognizes construction supervision as a patrol event", () => {
+  const result = classifyImage({
+    fileName: "施工监管.jpg",
+    ocrText: "10:30 2026-08-24 S101余家村 施工现场 作业安全"
+  });
+  assert.equal(result.event, "construction");
+  assert.equal(result.place, "施工监管点");
+});
+
 test("uses the historical Haidong main toll station wording in G6 narratives", () => {
   const draft = buildDraft({
     date: "2026-07-26",

@@ -66,6 +66,14 @@ const DEFAULT_CREDENTIAL_USER = "李彩燕";
 const CREDENTIAL_PREFERENCE_KEY = "qh-patrol:last-credential-user";
 const ROUTE_KEYS = Object.keys(ROUTES);
 const ROUTE_BADGES = { g6: "G6", west: "G6 西过境", s101: "S101" };
+const PHOTO_EVENT_OPTIONS = [
+  ["", "常规巡查"],
+  ["accident", "事故处理"],
+  ["construction", "施工监管"],
+  ["overload", "超限治理"],
+  ["facility-survey", "路域设施勘察"]
+];
+const PHOTO_EVENT_LABELS = Object.fromEntries(PHOTO_EVENT_OPTIONS);
 const PERSONNEL = Object.keys(OFFICIAL_PERSONNEL);
 const PATROL_VEHICLES = ["青A99R18", "青A33W69"];
 const DEFAULT_OFFICERS_BY_VEHICLE = {
@@ -576,6 +584,10 @@ async function recognizePhotos({ force = false, nonce = state.runNonce } = {}) {
         });
       }
       if (photo.manualTime) recognized.time = photo.time;
+      if (photo.manualEvent) {
+        recognized.event = photo.event || "";
+        recognized.manualEvent = true;
+      }
       if (photo.manualName) {
         recognized.nameBase = photo.nameBase;
         recognized.proposedName = photo.proposedName;
@@ -1152,7 +1164,14 @@ async function autoLogin() {
       }
       rememberCredentialUser(state.selectedCredentialUser);
       await synchronizeOfficialPersonnel();
-      addActivity(`已自动登录为 ${result.username || state.selectedCredentialUser}`, "success");
+      const elapsed = Number(result.loginElapsedMs);
+      const timing = Number.isFinite(elapsed)
+        ? `（${(elapsed / 1000).toFixed(elapsed < 1000 ? 1 : 2)} 秒）`
+        : "";
+      addActivity(
+        `已自动登录为 ${result.username || state.selectedCredentialUser}${timing}`,
+        result.loginWithinTarget === false ? "warn" : "success"
+      );
     } else {
       state.autoLoginError = "登录未完全成功，请重试或手动登录";
       addActivity(state.autoLoginError, "warn");
@@ -1296,6 +1315,7 @@ function renderPhotos() {
             : `<span class="thumbnail-placeholder">${icon("file-image", 22)}</span>`}
           <span class="route-overlay">${escapeHtml(routeCode)}</span>
           <span class="time-overlay">${escapeHtml(photo.time || "--:--")}</span>
+          ${photo.event ? `<span class="event-overlay ${escapeHtml(photo.event)}">${escapeHtml(PHOTO_EVENT_LABELS[photo.event] || photo.event)}</span>` : ""}
         </span>
         <span class="photo-tile-body">
           <strong title="${escapeHtml(photo.originalName)}">${escapeHtml(photo.originalName)}</strong>
@@ -1531,6 +1551,12 @@ function renderPhotoInspector(photo) {
       <label>
         <span>${icon("clock-3", 13)}水印时间</span>
         <input class="field-control photo-time-input" data-photo-time="${photo.sourceIndex}" type="time" value="${escapeHtml(photo.time || "")}">
+      </label>
+      <label>
+        <span>${icon("alert-circle", 13)}巡查事项</span>
+        <select class="field-control photo-event-select" data-photo-event="${photo.sourceIndex}" aria-label="设置巡查事项">
+          ${PHOTO_EVENT_OPTIONS.map(([value, label]) => `<option value="${value}" ${photo.event === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
       </label>
       <label>
         <span>${icon("file-text", 13)}规范附件名</span>
@@ -1789,6 +1815,56 @@ function applyManualPlace(photo, value) {
   });
 }
 
+function applyManualEvent(photo, event) {
+  const eventPlaces = {
+    accident: "事故处理点",
+    construction: "施工监管点",
+    overload: "治超点",
+    "facility-survey": "路域设施勘察"
+  };
+  const eventNames = {
+    accident: "事故现场",
+    construction: "施工监管",
+    overload: "治超",
+    "facility-survey": "路域设施勘察"
+  };
+  const place = eventPlaces[event];
+  const clearingEventPoint = !event && Object.values(eventPlaces).includes(photo.place);
+  if (event && photo.routeKey && ROUTES[photo.routeKey].checkpoints.some(([name]) => name === place)) {
+    Object.assign(photo, placeAssignment(photo.routeKey, place));
+    photo.confidence = "manual";
+    photo.include = true;
+    photo.manualAssignment = true;
+  }
+  photo.event = event;
+  photo.manualEvent = true;
+  photo.manualOverride = true;
+  if (event) {
+    photo.nameBase = eventNames[event];
+    photo.standardName = `${eventNames[event]}.jpg`;
+    photo.proposedName = photo.standardName;
+    photo.reason = `已人工标记为${PHOTO_EVENT_LABELS[event]}。`;
+  } else {
+    if (clearingEventPoint) {
+      photo.pointId = "";
+      photo.place = "待确认地点";
+      photo.semanticPoint = "";
+      photo.sequence = null;
+      photo.include = false;
+      photo.confidence = "review";
+      photo.manualAssignment = true;
+    }
+    photo.nameBase = clearingEventPoint
+      ? photo.originalName.replace(/\.[^.]+$/, "")
+      : photo.place || photo.originalName.replace(/\.[^.]+$/, "");
+    photo.standardName = `${photo.nameBase}.jpg`;
+    photo.proposedName = photo.standardName;
+    photo.reason = clearingEventPoint
+      ? "已清除专项事件，请重新选择常规巡查地点。"
+      : "已人工标记为常规巡查。";
+  }
+}
+
 function openPhotoDialog(photo) {
   if (!photo?.url) return;
   const root = $("#photo-dialog-root");
@@ -1992,6 +2068,21 @@ function bind() {
       photo.timeEstimated = false;
       photo.manualTime = true;
       synchronizeRouteTimes();
+      delete state.narrativeOverrides[photo.routeKey];
+      markDirty();
+      state.issues = collectIssues();
+      render();
+    });
+  });
+  document.querySelectorAll("[data-photo-event]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      const photo = photoBySourceIndex(Number(event.target.dataset.photoEvent));
+      if (!photo) return;
+      const previousRoute = photo.routeKey;
+      applyManualEvent(photo, event.target.value);
+      state.photos = normalizedPhotos(state.photos);
+      synchronizeRouteTimes();
+      delete state.narrativeOverrides[previousRoute];
       delete state.narrativeOverrides[photo.routeKey];
       markDirty();
       state.issues = collectIssues();

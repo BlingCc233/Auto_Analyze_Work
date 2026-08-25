@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.0.6
+        description: Release tag, for example v0.0.7
         required: true
-        default: v0.0.6
+        default: v0.0.7
         type: string
 
 permissions:
@@ -130,7 +130,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Linux aarch64 AppImage
+    name: Linux and UOS aarch64
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Check out source
@@ -160,19 +160,22 @@ jobs:
       - name: Run tests
         run: npm run test:ci
 
-      - name: Build arm64 AppImage
+      - name: Build arm64 AppImage, deb and portable archive
         run: |
           npm run build
-          npx electron-builder --linux AppImage --arm64 \
+          npx electron-builder --linux AppImage deb tar.gz --arm64 \
             --publish never \
             --config.electronVersion=22.3.27 \
-            --config.linux.artifactName=Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.AppImage
+            --config.linux.artifactName='Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.${ext}'
 
-      - name: Upload AppImage
+      - name: Upload Linux and UOS packages
         uses: actions/upload-artifact@v4
         with:
-          name: Linux-aarch64-AppImage
-          path: dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.AppImage
+          name: Linux-UOS-aarch64
+          path: |
+            dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.AppImage
+            dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.deb
+            dist/Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.tar.gz
           if-no-files-found: error
 
   publish:

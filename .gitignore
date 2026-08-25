@@ -1,8 +1,13 @@
 .env
 node_modules/
 dist/
-data/
+data/*
+!data/recent-daily-ground-truth.json
+!data/recent-daily-ppocrv6-ocr.json
 .DS_Store
 .chrome-official-profile/
+.chrome-login-profile/
+.ui-electron-session/
+daily/
 *.messy
 pwd.md

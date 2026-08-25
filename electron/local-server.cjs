@@ -502,12 +502,40 @@ async function startLocalServer({
       else response.end();
     }
   });
+  const sockets = new Set();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
 
   await listen(server, port);
   const address = server.address();
   origin = `http://127.0.0.1:${address.port}`;
+  let closePromise = null;
+  const close = () => {
+    if (closePromise) return closePromise;
+    closePromise = new Promise((resolveClose, rejectClose) => {
+      const forceTimer = setTimeout(() => {
+        for (const socket of sockets) socket.destroy();
+      }, 750);
+      forceTimer.unref?.();
+      const finish = (error) => {
+        clearTimeout(forceTimer);
+        if (error && error.code !== "ERR_SERVER_NOT_RUNNING") rejectClose(error);
+        else resolveClose();
+      };
+      if (!server.listening) {
+        finish();
+        return;
+      }
+      server.close(finish);
+      for (const socket of sockets) socket.end();
+    });
+    return closePromise;
+  };
   return {
     server,
+    close,
     url: origin,
     distRoot,
     preferredPortAvailable: address.port === port

@@ -127,6 +127,25 @@ test("builds an idempotent create-or-reuse plan without update identifiers", () 
   assert.equal(plan.journals[0].payload.weather, "1");
 });
 
+test("carries patrol event focus into new schedules without changing the official check type", () => {
+  const draft = westDraft();
+  draft.focus = `${draft.focus}；事故处理；施工监管`;
+  draft.checkType = "公路巡查";
+  const sources = new Map(draft.readiness.included.map((photo) => [
+    photo.originalName,
+    { mimeType: "image/jpeg", dataBase64: "/9j/2Q==" }
+  ]));
+  const plan = buildOfficialSubmitPlan({
+    date: "2026-07-26",
+    drafts: [draft],
+    weather: "晴",
+    attachmentSources: sources
+  });
+
+  assert.match(plan.schedules[0].payload.content, /事故处理；施工监管/);
+  assert.equal(plan.records[0].payload.checkType, "公路巡查");
+});
+
 test("refuses unknown personnel and unresolved photo review", () => {
   const draft = westDraft();
   draft.officers = ["不存在人员"];

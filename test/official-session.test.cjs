@@ -371,7 +371,13 @@ test("openLogin fills selected credentials and stops for the manual challenge", 
     return true;
   };
   let clicks = 0;
+  const loginOrder = [];
+  official._installCaptchaObserver = async () => {
+    loginOrder.push("observer");
+    return true;
+  };
   official._clickLoginButton = async () => {
+    loginOrder.push("click");
     clicks += 1;
     return true;
   };
@@ -387,6 +393,7 @@ test("openLogin fills selected credentials and stops for the manual challenge", 
     password: "secret"
   });
   assert.equal(clicks, 1);
+  assert.deepEqual(loginOrder, ["observer", "click"]);
   assert.equal(fakeWindow.showCalls, 1);
   assert.equal(fakeWindow.focusCalls, 1);
   assert.equal(result.credentialsFilled, true);
@@ -414,6 +421,7 @@ test("submits login after CAPTCHA and returns only API-verified authentication",
     loginRequired: false
   });
   const state = {
+    startedAt: 1000,
     captchaSolvedAt: null,
     submittedAfterCaptcha: false
   };
@@ -552,6 +560,107 @@ test("autoLogin returns an existing matching session without creating or reloadi
   const result = await official.autoLogin("李彩燕", "secret");
   assert.equal(result.username, "李彩燕");
   assert.equal(statusCalls, 1);
+});
+
+test("autoLogin reuses an authenticated persistent session discovered after the window loads", async () => {
+  let currentUrl = "";
+  class FakeBrowserWindow {
+    constructor() {
+      this.webContents = { getURL: () => currentUrl };
+    }
+    isDestroyed() { return false; }
+    on() {}
+    async loadURL(url) { currentUrl = url; }
+  }
+  const official = new OfficialSession({
+    BrowserWindow: FakeBrowserWindow,
+    logger: { log() {}, error() {} }
+  });
+  official._attachWindowGuards = () => {};
+  official._waitForPageReady = async () => {};
+  official._fillLoginForm = async () => {
+    throw new Error("login form must not be filled for a restored session");
+  };
+  let statusCalls = 0;
+  official.status = async ({ createWindow }) => {
+    assert.equal(createWindow, false);
+    statusCalls += 1;
+    return statusCalls === 1
+      ? { authenticated: false, serviceReady: false, username: "" }
+      : { authenticated: true, serviceReady: true, username: "李彩燕" };
+  };
+
+  const result = await official.autoLogin("李彩燕", "secret");
+  assert.equal(result.username, "李彩燕");
+  assert.equal(statusCalls, 2);
+});
+
+test("recomputes the CAPTCHA gap for each slider attempt", async () => {
+  class UnusedWindow {}
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  const slider = { trackWidth: 300 };
+  const initial = { offset: 101 };
+  const gaps = [{ offset: 146 }, null];
+  official._findGapPosition = async () => gaps.shift();
+
+  const first = await official._resolveSliderOffset(slider, initial, 0);
+  const second = await official._resolveSliderOffset(slider, first.gapInfo, 1);
+  const fallback = await official._resolveSliderOffset(slider, second.gapInfo, 2);
+  assert.deepEqual(
+    [first.offset, second.offset, fallback.offset],
+    [101, 146, 143]
+  );
+  assert.equal(first.fresh, true);
+  assert.equal(second.fresh, true);
+  assert.equal(fallback.fresh, false);
+});
+
+test("waits for decoded CAPTCHA pixels instead of making a blind first drag", async () => {
+  class UnusedWindow {}
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  const gaps = [null, null, { offset: 187, confidence: 92 }];
+  let calls = 0;
+  official._findGapPosition = async () => {
+    calls += 1;
+    return gaps.shift();
+  };
+  const result = await official._waitForSliderSolution({}, 500);
+  assert.deepEqual(result, { offset: 187, confidence: 92 });
+  assert.equal(calls, 3);
+});
+
+test("uses native input events for a complete pressed-moved-released trajectory", async () => {
+  class UnusedWindow {}
+  const events = [];
+  const official = new OfficialSession({
+    BrowserWindow: UnusedWindow,
+    logger: { log() {}, error() {} }
+  });
+  official.window = {
+    isDestroyed: () => false,
+    webContents: {
+      sendInputEvent: (event) => events.push(event),
+      debugger: {
+        attach: () => { throw new Error("debugger fallback must not run"); }
+      }
+    }
+  };
+  const result = await official._simulateSliderDragV2({
+    trackWidth: 300,
+    containerRect: { x: 10 },
+    handleRect: { x: 11, y: 20, width: 40, height: 40 }
+  }, 180);
+  assert.equal(result, true);
+  assert.equal(events[0].type, "mouseDown");
+  assert.equal(events.at(-1).type, "mouseUp");
+  assert.equal(events.filter((event) => event.type === "mouseMove").length, 16);
+  assert.equal(events.at(-1).x, 210);
 });
 
 test("logout revokes the official session, clears token cookies and verifies signed-out state", async () => {

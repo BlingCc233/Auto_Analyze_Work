@@ -865,6 +865,37 @@ label.file-button:focus-within {
   font-weight: 680;
 }
 
+.event-overlay {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  max-width: calc(100% - 12px);
+  min-height: 20px;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(31, 78, 121, 0.9);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-overlay.accident {
+  background: rgba(155, 48, 48, 0.92);
+}
+
+.event-overlay.construction {
+  background: rgba(154, 94, 22, 0.92);
+}
+
+.event-overlay.facility-survey {
+  background: rgba(38, 104, 73, 0.92);
+}
+
 .route-overlay {
   left: 6px;
   max-width: calc(100% - 66px);

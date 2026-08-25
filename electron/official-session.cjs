@@ -1129,6 +1129,14 @@ try{
       });
     }catch(_){return false;}
   };
+  if(input.type==="status"&&!hasSession()){
+    return{ok:true,value:{
+      serviceReady:Boolean(document.querySelector("#app")),
+      authenticated:false,
+      responseCode:"",
+      username:""
+    }};
+  }
   const webpackRequire=captureRequire();
   const requestModule=webpackRequire(0);
   const request=requestModule&&requestModule.a;
@@ -1229,6 +1237,21 @@ class OfficialSession {
 
   _newToken(bytes = 24) {
     return this.randomBytes(bytes).toString("base64url");
+  }
+
+  _loginResult(result, startedAt, username = "") {
+    const loginElapsedMs = Math.max(0, this.now() - startedAt);
+    const decorated = {
+      ...result,
+      loginElapsedMs,
+      loginWithinTarget: loginElapsedMs <= 3000
+    };
+    if (username) decorated.username = username;
+    this._log(
+      "log",
+      `[auto-login] verified in ${loginElapsedMs}ms (${decorated.loginWithinTarget ? "within" : "over"} 3s target)`
+    );
+    return decorated;
   }
 
   async _storeAuthenticatedUsername(username) {
@@ -1373,12 +1396,6 @@ class OfficialSession {
     const username = String(options?.username || "").trim();
     const password = String(options?.password || "");
 
-    if (username && password && this._isWindowUsable()) {
-      try { this.window.destroy(); } catch {}
-      this.window = null;
-      this.loadPromise = null;
-    }
-
     await this.ensureWindow({ show: true });
     if (!username || !password) {
       return this.status({ createWindow: false });
@@ -1400,6 +1417,7 @@ class OfficialSession {
       );
     }
 
+    await this._installCaptchaObserver();
     await this._clickLoginButton();
     this.pendingUsername = username;
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -1613,6 +1631,33 @@ class OfficialSession {
     }
   }
 
+  async _waitForLoginForm(timeoutMs = 15000) {
+    if (!this._isWindowUsable()) return false;
+    try {
+      return await this.window.webContents.executeJavaScript(`new Promise((resolve) => {
+        const ready = () => Boolean(
+          document.querySelector('input[type="password"]')
+          && Array.from(document.querySelectorAll('button, .el-button, [role="button"]'))
+            .some((element) => /登录|登\\s*录|login/i.test(element.textContent || ''))
+        );
+        if (ready()) return resolve(true);
+        const observer = new MutationObserver(() => {
+          if (!ready()) return;
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(true);
+        });
+        const timer = setTimeout(() => {
+          observer.disconnect();
+          resolve(false);
+        }, ${Math.max(0, Number(timeoutMs) || 0)});
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      })`);
+    } catch {
+      return false;
+    }
+  }
+
   async _clickLoginButton() {
     if (!this._isWindowUsable()) return false;
     const wc = this.window.webContents;
@@ -1637,6 +1682,45 @@ class OfficialSession {
         return false;
       })()`);
     } catch {
+      return false;
+    }
+  }
+
+  async _installCaptchaObserver() {
+    if (!this._isWindowUsable()) return false;
+    try {
+      return await this.window.webContents.executeJavaScript(`(function() {
+        try {
+          if (window.__qhCaptchaObserverInstalled) return true;
+          window.__qhCaptchaObserverInstalled = true;
+          var origOpen = XMLHttpRequest.prototype.open;
+          var origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function(method, url) {
+            this.__qhCaptchaUrl = url;
+            return origOpen.apply(this, arguments);
+          };
+          XMLHttpRequest.prototype.send = function(body) {
+            var request = this;
+            if (request.__qhCaptchaUrl) {
+              request.addEventListener('load', function() {
+                if (!new RegExp('captcha/check', 'i').test(request.__qhCaptchaUrl) || request.status !== 200) return;
+                try {
+                  var response = JSON.parse(request.responseText);
+                  if (response.success && response.repData && response.repData.result === true) {
+                    localStorage.setItem('_captcha_solved', '1');
+                  }
+                } catch(e) {}
+              });
+            }
+            return origSend.apply(this, arguments);
+          };
+          return true;
+        } catch(e) {
+          return false;
+        }
+      })()`);
+    } catch (error) {
+      this._log("warn", "[auto-login] CAPTCHA observer install failed", error?.message || error);
       return false;
     }
   }
@@ -1776,6 +1860,40 @@ class OfficialSession {
     } catch(e) { this._log("warn", `[auto-login] NCC error: ${e.message}`); return null; }
   }
 
+  async _resolveSliderOffset(sliderInfo, previousGap, attempt) {
+    const freshGap = attempt === 0 && previousGap
+      ? previousGap
+      : await this._findGapPosition(sliderInfo);
+    const gapInfo = freshGap || previousGap;
+    if (gapInfo && Number.isFinite(gapInfo.offset)) {
+      const tweaks = [0, 3, -3, 5, -5];
+      return {
+        gapInfo,
+        offset: gapInfo.offset + (freshGap ? 0 : (tweaks[attempt] || 0)),
+        fresh: Boolean(freshGap)
+      };
+    }
+    return {
+      gapInfo: null,
+      offset: Math.round(sliderInfo.trackWidth * (0.7 + attempt * 0.04)),
+      fresh: false
+    };
+  }
+
+  async _waitForSliderSolution(sliderInfo, timeoutMs = 1200) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      const gap = await this._findGapPosition(sliderInfo);
+      if (
+        gap
+        && Number.isFinite(gap.offset)
+        && Number(gap.confidence) >= 60
+      ) return gap;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } while (Date.now() < deadline);
+    return null;
+  }
+
   // ─── 增强滑块拖拽 ────────────────────────────────────
   async _simulateSliderDragV2(sliderInfo, targetOffset) {
     if (!sliderInfo || !this._isWindowUsable()) return false;
@@ -1789,6 +1907,43 @@ class OfficialSession {
     if (dragDist > sliderInfo.trackWidth + 10) dragDist = sliderInfo.trackWidth;
     const endX = Math.round(handleCX + dragDist);
 
+    if (typeof wc.sendInputEvent === "function") {
+      wc.sendInputEvent({
+        type: "mouseDown",
+        x: handleCX,
+        y: startY,
+        button: "left",
+        clickCount: 1
+      });
+      await new Promise((resolve) => setTimeout(resolve, 35 + Math.random() * 20));
+      const steps = 16;
+      for (let index = 1; index <= steps; index += 1) {
+        const time = index / steps;
+        const eased = time < 0.5
+          ? 2 * time * time
+          : 1 - Math.pow(-2 * time + 2, 2) / 2;
+        wc.sendInputEvent({
+          type: "mouseMove",
+          x: Math.round(handleCX + dragDist * eased),
+          y: Math.round(startY + Math.sin(index * 0.55) * 2),
+          button: "left"
+        });
+        await new Promise((resolve) => setTimeout(
+          resolve,
+          time > 0.85 ? 8 + Math.random() * 5 : 4 + Math.random() * 3
+        ));
+      }
+      wc.sendInputEvent({
+        type: "mouseUp",
+        x: endX,
+        y: startY,
+        button: "left",
+        clickCount: 1
+      });
+      this._log("log", `[auto-login] native trajectory: offset=${targetOffset} dist=${Math.round(dragDist)}px`);
+      return true;
+    }
+
     try { wc.debugger.attach("1.3"); } catch(e) {
       if (e.message && e.message.includes("already attached")) { try { wc.debugger.detach(); } catch{} wc.debugger.attach("1.3"); }
       else { this._log("warn", `[auto-login] debugger: ${e.message}`); return false; }
@@ -1797,7 +1952,7 @@ class OfficialSession {
       // mousePressed
       await wc.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mousePressed", x: handleCX, y: startY, button: "left", clickCount: 1 });
       await new Promise(r => setTimeout(r, 40 + Math.random()*60));
-      // mouseMoved (no mouseReleased - JS bypass handles verification)
+      // mouseMoved with a short eased trajectory.
       const steps = 22 + Math.floor(Math.random()*8);
       for (let i = 1; i <= steps; i++) {
         const t = i/steps, eased = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
@@ -1805,6 +1960,13 @@ class OfficialSession {
         await wc.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy, button: "left", movementX: Math.round(dragDist/steps), movementY: 0 });
         await new Promise(r => setTimeout(r, t>0.9 ? 8+Math.random()*15 : 3+Math.random()*5));
       }
+      await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: endX,
+        y: startY,
+        button: "left",
+        clickCount: 1
+      });
       this._log("log", `[auto-login] CDP trajectory: offset=${targetOffset} dist=${Math.round(dragDist)}px`);
       return true;
     } catch(e) { this._log("warn", `[auto-login] CDP error: ${e.message}`); return false; }
@@ -1951,18 +2113,21 @@ class OfficialSession {
 
     if (progress.captchaSolved && state.captchaSolvedAt === null) {
       state.captchaSolvedAt = this.now();
-      this._log("log", "[auto-login] CAPTCHA accepted; waiting for the site login callback");
+      this._log(
+        "log",
+        `[auto-login] CAPTCHA accepted +${this.now() - state.startedAt}ms; waiting for the site login callback`
+      );
     }
     if (
       state.captchaSolvedAt !== null
       && !state.submittedAfterCaptcha
-      && this.now() - state.captchaSolvedAt >= 700
+      && this.now() - state.captchaSolvedAt >= 120
     ) {
       state.submittedAfterCaptcha = await this._clickLoginButton();
       this._log(
         state.submittedAfterCaptcha ? "log" : "warn",
         state.submittedAfterCaptcha
-          ? "[auto-login] login submitted after CAPTCHA acceptance"
+          ? `[auto-login] login submitted +${this.now() - state.startedAt}ms after CAPTCHA acceptance`
           : "[auto-login] CAPTCHA accepted but login button was not found"
       );
     }
@@ -1970,11 +2135,12 @@ class OfficialSession {
 
     const verified = await this.status({ createWindow: false });
     if (!verified.authenticated || !verified.serviceReady) return null;
-    this._log("log", "[auto-login] login token verified by official API");
+    this._log("log", `[auto-login] login token verified by official API +${this.now() - state.startedAt}ms`);
     return verified;
   }
 
   async autoLogin(username, password) {
+    const startedAt = this.now();
     if (typeof username !== "string" || !username.trim()) {
       throw new OfficialSessionError("INVALID_CREDENTIAL", "用户名不能为空");
     }
@@ -1985,19 +2151,21 @@ class OfficialSession {
     // 1. 先检查是否已登录
     const requestedUsername = username.trim();
     const current = await this.status({ createWindow: false });
+    this._log("log", `[auto-login] initial status +${this.now() - startedAt}ms`);
     if (
       current.authenticated
       && current.serviceReady
       && current.username === requestedUsername
     ) {
       this._log("log", "[auto-login] already authenticated, skipping");
-      return current;
+      return this._loginResult(current, startedAt, requestedUsername);
     }
     if (current.authenticated && current.serviceReady) {
       this._log("log", `[auto-login] switching authenticated account to ${requestedUsername}`);
       await this.logout();
     }
     this.pendingUsername = requestedUsername;
+    if (this.loadPromise) await this.loadPromise;
 
     // 2. 复用已有官方窗口，避免状态检查后销毁并重复加载官网。
     if (!this._isWindowUsable()) {
@@ -2033,6 +2201,28 @@ class OfficialSession {
       }
     }
     await this._waitForPageReady();
+    this._log("log", `[auto-login] login page ready +${this.now() - startedAt}ms`);
+
+    const loadedSession = await this.status({ createWindow: false });
+    this._log("log", `[auto-login] loaded session checked +${this.now() - startedAt}ms`);
+    if (
+      loadedSession.authenticated
+      && loadedSession.serviceReady
+      && loadedSession.username === requestedUsername
+    ) {
+      this._log("log", "[auto-login] persistent session restored after page load");
+      return this._loginResult(loadedSession, startedAt, requestedUsername);
+    }
+    if (loadedSession.authenticated && loadedSession.serviceReady) {
+      this._log("log", `[auto-login] loaded session belongs to another account; switching to ${requestedUsername}`);
+      await this.logout();
+    } else {
+      const loadedUrl = String(this.window.webContents.getURL() || "");
+      if (!/\/#\/login(?:[/?#]|$)/i.test(loadedUrl)) {
+        try { await this.window.loadURL(`${new URL(this.officialUrl).origin}/#/login`); } catch {}
+        await this._waitForPageReady();
+      }
+    }
 
     // 4. 尝试最多 3 轮自动登录
     const deadline = Date.now() + 120000; // 2 分钟总超时
@@ -2048,54 +2238,54 @@ class OfficialSession {
         );
       } catch {}
       const filled = await this._fillLoginForm(username, password);
-      if (!filled) {
+      let formFilled = filled;
+      if (!formFilled) {
+        await this._waitForLoginForm(1200);
+        formFilled = await this._fillLoginForm(username, password);
+      }
+      if (!formFilled) {
         this._log("warn", "[auto-login] could not fill login form, retrying...");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
         continue;
       }
+      this._log("log", `[auto-login] credentials filled +${this.now() - startedAt}ms`);
 
-      // 4b. 点击登录按钮
-      await this._clickLoginButton();
+      // 4b. 先监听验证结果，再点击登录按钮，避免漏掉快速返回的 CAPTCHA 请求。
+      await this._installCaptchaObserver();
+      const clicked = await this._clickLoginButton();
+      if (!clicked) {
+        this._log("warn", "[auto-login] login button was not ready; retrying");
+        continue;
+      }
       let sliderReady = null;
-      const sliderDeadline = Date.now() + 1500;
+      const sliderDeadline = Date.now() + 1800;
       while (Date.now() < sliderDeadline && !sliderReady?.found) {
         sliderReady = await this._detectSlider();
         if (!sliderReady?.found) await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      // 4c. Set up XHR interception to detect captcha success
-      await this.window.webContents.executeJavaScript(`(function() {
-        try {
-          var origOpen = XMLHttpRequest.prototype.open;
-          var origSend = XMLHttpRequest.prototype.send;
-          XMLHttpRequest.prototype.open = function(m, url) { this._u = url; return origOpen.apply(this, arguments); };
-          XMLHttpRequest.prototype.send = function(body) {
-            var s = this;
-            if (s._u) {
-              s.addEventListener('load', function() {
-                if (new RegExp('captcha/check','i').test(s._u) && s.status === 200) {
-                  try {
-                    var r = JSON.parse(s.responseText);
-                    if (r.success && r.repData && r.repData.result === true) {
-                      console.log('[auto-login] *** CAPTCHA SOLVED! ***');
-                      localStorage.setItem('_captcha_solved', '1');
-                    }
-                  } catch(e) {}
-                }
-              });
-            }
-            return origSend.apply(this, arguments);
-          };
-        } catch(e) {}
-      })()`);
-
-      // 4d. 检测滑块 + NCC缺口检测 + 精准拖拽
+      // 4c. 检测滑块 + NCC缺口检测 + 精准拖拽
       const slider = sliderReady || await this._detectSlider();
       let gapInfo = null;
 
       if (slider && slider.found) {
         this._log("log", `[auto-login] slider found: ${slider.containerSelector} trackWidth=${slider.trackWidth}`);
-        gapInfo = await this._findGapPosition(slider);
+        gapInfo = await this._waitForSliderSolution(slider);
+        if (!gapInfo) {
+          this._log("warn", "[auto-login] slider images were not ready; retrying form submission");
+          continue;
+        }
+        this._log("log", `[auto-login] slider solution ready +${this.now() - startedAt}ms`);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const directStatus = await this.status({ createWindow: false });
+        if (directStatus.authenticated && directStatus.serviceReady) {
+          this.authenticatedUsername = requestedUsername;
+          this.pendingUsername = "";
+          await this._storeAuthenticatedUsername(requestedUsername);
+          return this._loginResult(directStatus, startedAt, requestedUsername);
+        }
+        this._log("warn", "[auto-login] slider did not appear; retrying form submission");
+        continue;
       }
 
       // Multi-attempt drag with tweaks
@@ -2103,52 +2293,29 @@ class OfficialSession {
       let success = false;
       let authenticatedStatus = null;
       const loginProgressState = {
+        startedAt,
         captchaSolvedAt: null,
         submittedAfterCaptcha: false
       };
       for (let sub = 0; sub < MAX_SUB && !success && Date.now() < deadline; sub++) {
         const curSlider = await this._detectSlider();
         if (curSlider && curSlider.found) {
-          let tryOffset;
-          if (gapInfo && gapInfo.offset) {
-            const tweaks = [0, 3, -3, 5, -5];
-            tryOffset = gapInfo.offset + (tweaks[sub] || 0);
-            this._log("log", `[auto-login] sub-${sub+1}/${MAX_SUB}: offset=${tryOffset}px (base=${gapInfo.offset})`);
-          } else {
-            tryOffset = Math.round(curSlider.trackWidth * (0.7 + sub * 0.04));
-            this._log("log", `[auto-login] sub-${sub+1}/${MAX_SUB}: blind offset=${tryOffset}px`);
-          }
+          const resolvedOffset = await this._resolveSliderOffset(curSlider, gapInfo, sub);
+          gapInfo = resolvedOffset.gapInfo;
+          const tryOffset = resolvedOffset.offset;
+          this._log(
+            "log",
+            `[auto-login] sub-${sub+1}/${MAX_SUB}: ${resolvedOffset.fresh ? "fresh NCC" : gapInfo ? "cached NCC" : "blind"} offset=${tryOffset}px`
+          );
 
-          // CDP trajectory (no mouseReleased)
+          // 使用真实鼠标轨迹并在目标位置释放，只触发一次验证码校验。
           await this._simulateSliderDragV2(curSlider, tryOffset);
-
-          // JS bypass: set correct left position and call end() to verify
-          await this.window.webContents.executeJavaScript(`(function() {
-            try {
-              var slider = document.querySelector('.verify-slider');
-              if (!slider || !slider.__vue__) return;
-              var vm = slider.__vue__;
-              var handleOff = ${curSlider.handleRect.x - curSlider.containerRect.x};
-              var targetOffset = ${tryOffset};
-              var targetLeft = targetOffset - handleOff;
-
-              // Set drag state
-              vm.status = true; vm.left = targetLeft; vm.isEnd = false;
-              vm.startLeft = handleOff + 10;
-              vm.startMoveTime = Date.now() - 2000;
-              vm.endMovetime = Date.now();
-
-              // Call end() to trigger verification
-              var endX = slider.getBoundingClientRect().x + handleOff + targetLeft;
-              var evt = new MouseEvent('mouseup', { bubbles:true, cancelable:true, clientX:endX, clientY:slider.getBoundingClientRect().y+50, button:0 });
-              if (typeof vm.end === 'function') vm.end(evt);
-              console.log('[auto-login] JS bypass: left=' + targetLeft + ' end() called');
-            } catch(e) { console.log('[auto-login] bypass error: ' + e.message); }
-          })()`);
+          this._log("log", `[auto-login] slider released +${this.now() - startedAt}ms`);
         }
 
         // Poll for login success (10s per sub-attempt)
-        const subDeadline = Date.now() + 10000;
+        const subStartedAt = Date.now();
+        const subDeadline = subStartedAt + 10000;
         while (Date.now() < subDeadline && !success) {
           const poll = await this.window.webContents.executeJavaScript(`(() => {
             var hasToken = false;
@@ -2180,7 +2347,16 @@ class OfficialSession {
             break;
           }
           if (!poll || !poll.slider) { this._log("log", "[auto-login] slider disappeared, waiting for login..."); }
-          await new Promise(r => setTimeout(r, poll && poll.token ? 200 : 350));
+          if (
+            poll?.slider
+            && !poll.captchaSolved
+            && !poll.token
+            && Date.now() - subStartedAt >= 2200
+          ) {
+            this._log("log", "[auto-login] CAPTCHA was not accepted; refreshing gap detection");
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 75));
         }
         if (success) break;
       }
@@ -2190,7 +2366,7 @@ class OfficialSession {
         this.authenticatedUsername = requestedUsername;
         this.pendingUsername = "";
         await this._storeAuthenticatedUsername(requestedUsername);
-        return { ...result, username: requestedUsername };
+        return this._loginResult(result, startedAt, requestedUsername);
       }
 
       this._log("warn", `[auto-login] round ${round + 1} exhausted, retrying...`);
@@ -2216,7 +2392,7 @@ class OfficialSession {
         await this._storeAuthenticatedUsername(requestedUsername);
         return { ...status, username: requestedUsername };
       }
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
     throw new OfficialSessionError(

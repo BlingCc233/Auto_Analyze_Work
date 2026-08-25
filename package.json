@@ -1,6 +1,6 @@
 {
   "name": "qh-duty-desk",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "韵家口大队巡查记录工作台",
   "author": {
     "name": "blingcc",
@@ -13,10 +13,11 @@
     "dev": "node server.mjs",
     "build": "vite build",
     "test": "node --test",
-    "test:ci": "node --test test/domain.test.js test/local-origin.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs test/ppocrv6-wasm.test.js",
+    "test:ci": "node --test test/app-lifecycle.test.cjs test/benchmark-known-daily.test.js test/benchmark-recent-daily.test.js test/domain.test.js test/electron-local-server.test.cjs test/local-origin.test.js test/official-cdp-bridge.test.js test/official-plan.test.js test/official-session.test.cjs test/ppocrv6-wasm.test.js",
     "benchmark:acceptance": "node scripts/benchmark-acceptance.mjs",
     "benchmark:current-ocr": "node scripts/benchmark-current-ocr.mjs",
     "benchmark:known-daily": "node scripts/benchmark-known-daily.mjs",
+    "benchmark:recent-daily": "node scripts/benchmark-recent-daily.mjs",
     "capture:known-daily-ocr": "node scripts/capture-known-daily-ocr.mjs",
     "benchmark:native-ocr": "node scripts/benchmark-native-ocr.mjs",
     "benchmark:holdout": "node scripts/benchmark-holdout.mjs",
@@ -95,8 +96,28 @@
     },
     "linux": {
       "icon": "build/icons",
+      "category": "Utility",
+      "synopsis": "韵家口大队巡查记录工作台",
+      "artifactName": "${productName}-${version}-Linux-${arch}.${ext}",
       "target": [
-        "AppImage"
+        {
+          "target": "AppImage",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "arm64"
+          ]
+        }
       ]
     }
   }

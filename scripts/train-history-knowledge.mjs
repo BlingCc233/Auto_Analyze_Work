@@ -8,8 +8,13 @@ const ocrSources = ["vision-ocr.json", "ppocrv6-ocr.json"]
   .map((name) => path.join(root, "data/history", name))
   .filter((file) => fs.existsSync(file))
   .map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
-const dailyTruthPath = path.join(root, "data/known-daily-ground-truth.json");
-const dailyOcrPath = path.join(root, "data/known-daily-ppocrv6-ocr.json");
+const dailySources = [
+  ["known-daily-ground-truth.json", "known-daily-ppocrv6-ocr.json"],
+  ["recent-daily-ground-truth.json", "recent-daily-ppocrv6-ocr.json"]
+].map(([truthName, ocrName]) => ({
+  truthPath: path.join(root, "data", truthName),
+  ocrPath: path.join(root, "data", ocrName)
+}));
 
 function normalizeKnowledgeText(value = "") {
   return String(value)
@@ -68,14 +73,15 @@ const entries = truth.flatMap((item) => {
   });
 });
 
-if (fs.existsSync(dailyTruthPath) && fs.existsSync(dailyOcrPath)) {
+for (const { truthPath: dailyTruthPath, ocrPath: dailyOcrPath } of dailySources) {
+  if (!fs.existsSync(dailyTruthPath) || !fs.existsSync(dailyOcrPath)) continue;
   const dailyTruth = JSON.parse(fs.readFileSync(dailyTruthPath, "utf8"));
   const dailyOcr = new Map(
     JSON.parse(fs.readFileSync(dailyOcrPath, "utf8"))
       .map((item) => [item.file, item.text])
   );
   const groupOrder = new Map();
-  for (const [folder, name, time, routeKey, place, include, recordHint] of dailyTruth) {
+  for (const [folder, name, time, routeKey, place, include, recordHint, event = ""] of dailyTruth) {
     const file = `daily/${folder}/${name}`;
     const normalizedText = normalizeKnowledgeText(dailyOcr.get(file) ?? "");
     if (!normalizedText) continue;
@@ -93,13 +99,19 @@ if (fs.existsSync(dailyTruthPath) && fs.existsSync(dailyOcrPath)) {
       routeKey,
       place,
       semanticPoint: place,
-      event: "",
+      event,
       expectedTime: time,
       include,
       recordHint,
-      sessionHint: recordHint ? "1" : "",
+      sessionHint: recordHint?.match(/-(\d+)$/)?.[1] ?? (recordHint ? "1" : ""),
       sequenceHint: include ? sequenceHint : null,
-      nameBase: include ? (aliases[place] || place) : ""
+      nameBase: include
+        ? event === "accident"
+          ? "事故现场"
+          : event === "construction"
+            ? "施工监管"
+            : aliases[place] || place
+        : ""
     });
   }
 }
