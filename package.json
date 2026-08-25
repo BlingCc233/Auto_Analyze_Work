@@ -31,7 +31,7 @@
     "desktop:dev": "npm run build && electron electron/main.cjs",
     "package:mac": "npm run build:native-ocr:mac && npm run build && electron-builder --mac",
     "package:win": "npm run build && electron-builder --win",
-    "package:linux": "npm run build && electron-builder --linux"
+    "package:linux": "npm run build && electron-builder --linux AppImage tar.gz --arm64"
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",

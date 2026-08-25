@@ -163,10 +163,15 @@ jobs:
       - name: Build arm64 AppImage, deb and portable archive
         run: |
           npm run build
-          npx electron-builder --linux AppImage deb tar.gz --arm64 \
+          npx electron-builder --linux AppImage tar.gz --arm64 \
             --publish never \
             --config.electronVersion=22.3.27 \
             --config.linux.artifactName='Yunjiaokou-Patrol-${{ env.RELEASE_TAG }}-Linux-aarch64.${ext}'
+          version="${RELEASE_TAG#v}"
+          bash scripts/build-linux-deb.sh \
+            "$version" \
+            dist/linux-arm64-unpacked \
+            "dist/Yunjiaokou-Patrol-${RELEASE_TAG}-Linux-aarch64.deb"
 
       - name: Upload Linux and UOS packages
         uses: actions/upload-artifact@v4
