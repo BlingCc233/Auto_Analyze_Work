@@ -10,10 +10,9 @@ npm run build
 
 ## 统信 UOS ARM64
 
-`v0.0.7` 起同时发布三种 ARM64 Linux 产物：
+`v0.0.8` 起发布两种 ARM64 Linux 产物：
 
-- `*.deb`：UOS 首选，使用系统软件安装器打开，或执行 `sudo apt install ./文件名.deb`。
 - `*.tar.gz`：不依赖 FUSE，解压后直接运行目录内的 `qh-duty-desk`。
-- `*.AppImage`：适合已启用 FUSE 2 的系统；缺少 FUSE 时可执行 `./文件名.AppImage --appimage-extract-and-run`。
+- `*.AppImage`：使用按 ARMv8.0 基线重编译的静态 runtime，不依赖 FUSE 或 LSE 原子指令；发布前会在 ARM64 CI 上执行 `--appimage-extract`，验证 runtime 本身及内层程序均可解压。
 
 所有 Linux 产物均为 `aarch64/arm64`，不适用于 x86_64 电脑。

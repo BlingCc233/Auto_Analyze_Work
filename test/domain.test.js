@@ -475,6 +475,30 @@ test("resolves the complete July 27 G6 sequence without contextual review", () =
   assert.equal(routeReadiness("g6", photos).ready, true);
 });
 
+test("keeps the verified August 26 G6 series in one automatic batch", () => {
+  const photos = resolvePhotoAssignments([
+    ["微信图片_20260826174733_157_70.jpg", "15:06 2026-08-26 西宁市 祁连路派出所 G6京藏高速公路平西段"],
+    ["微信图片_20260826174734_158_70.jpg", "15:22 2026-08-26 海东市 G0611张汶高速 G6京藏高速公路平西段"],
+    ["微信图片_20260826174735_159_70.jpg", "16:01 2026-08-26 ETC专用 未授权位置 G6京藏高速公路平西段"],
+    ["微信图片_20260826174736_160_70.jpg", "16:23 2026-08-26 未授权位置 G6京藏高速公路平西段"],
+    ["微信图片_20260826174737_161_70.jpg", "17:40 2026-08-26 西宁市 北禅路 禁达木错 通海络 塔尔寺祁连路 海湖路 G6京藏高速公路平西段"]
+  ].map(([fileName, ocrText]) => classifyImage({ fileName, ocrText })));
+
+  assert.deepEqual(
+    photos.map((photo) => [photo.time, photo.routeKey, photo.place]),
+    [
+      ["15:06", "g6", "同仁路口驶入高速"],
+      ["15:22", "g6", "海东主线收费站"],
+      ["16:01", "g6", "平安收费站"],
+      ["16:23", "g6", "海东主线收费站"],
+      ["17:40", "g6", "柴达木路高速路口"]
+    ]
+  );
+  assert.equal(new Set(photos.map((photo) => photo.contextBatch)).size, 1);
+  assert.equal(routeReadiness("g6", photos).reviewCount, 0);
+  assert.equal(routeReadiness("g6", photos).ready, true);
+});
+
 test("separates the complete July 27 morning and afternoon patrols from one WeChat series", () => {
   const fixtures = [
     {

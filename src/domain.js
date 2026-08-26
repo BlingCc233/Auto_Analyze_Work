@@ -83,7 +83,7 @@ const PLACE_RULES = [
   { id: "shared-chaoyang", name: "朝阳立交", semanticPoint: "朝阳互通立交连接段", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 2, match: /北山(?:桥|美丽园)|北禅路|南辅路/, score: 95, attachmentName: "朝阳立交.jpg", shared: true },
   { id: "shared-chaoyang-weak", name: "朝阳立交", semanticPoint: "朝阳互通立交连接段", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 2, match: /祁连路/, score: 82, attachmentName: "朝阳立交.jpg", shared: true },
   { id: "shared-connector", name: "连接段", semanticPoint: "朝阳互通立交连接段", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 1, match: /S1113宁贵高速|G0611张汶高速/, score: 58, attachmentName: "连接段.jpg", shared: true },
-  { id: "g6-chaidamu", name: "柴达木路高速路口", semanticPoint: "柴达木路高速入口", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 1, match: /柴达木(?:公园|路)|同仁路口.*离开/, score: 99, attachmentName: "柴达木路高速路口.jpg", shared: true },
+  { id: "g6-chaidamu", name: "柴达木路高速路口", semanticPoint: "柴达木路高速入口", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 1, match: /(?:柴|禁)达木(?:公园|路|错)|同仁路口.*离开/, score: 99, attachmentName: "柴达木路高速路口.jpg", shared: true },
   { id: "g6-construction", name: "施工监管点", semanticPoint: "G6 K1772绿化施工路段", routeKey: "g6", order: 9, match: /K177[1-4]|施工监管|绿化作业|养护作业|规范摆放警示|作业安全/, score: 96, attachmentName: "施工监管.jpg", event: "construction" },
   { id: "g6-overload", name: "治超点", semanticPoint: "海东主线收费站治超点", routeKey: "g6", order: 7, match: /治超|超限治理|检测站|核查货运|货运车辆/, score: 96, attachmentName: "治超.jpg", event: "overload" },
   { id: "g6-overload-visual", name: "治超点", semanticPoint: "海东主线收费站治超点", routeKey: "g6", routeOptions: ["g6", "west"], order: 7, match: /总质量|栏板高度|领航版|国六/, score: 74, attachmentName: "治超.jpg", event: "overload", shared: true },
@@ -452,6 +452,16 @@ function assignContextBatches(photos, gapMinutes = 75) {
         )
         .map((photo) => photo.routeKey)
     );
+    const g6MainlineEvidence = (group) => group.some((photo) =>
+      photo.routeOptions?.includes("g6")
+      && (photo.score ?? 0) >= 82
+      && (photo.pointId === "g6-haidong" || /海东|G0611张汶高速/.test(normalizeText(photo.ocrText)))
+    );
+    const g6ReturnExitEvidence = (group) => group.some((photo) =>
+      photo.routeOptions?.includes("g6")
+      && (photo.score ?? 0) >= 82
+      && /(?:柴|禁)达木|海湖路.{0,8}通海|塔尔寺.{0,8}祁连路/.test(normalizeText(photo.ocrText))
+    );
     const merged = [];
     for (const group of provisional) {
       const previous = merged.at(-1);
@@ -467,7 +477,16 @@ function assignContextBatches(photos, gapMinutes = 75) {
       const weakReturnContinuation = gap <= 180
         && previousRoutes.size > 0
         && currentRoutes.size === 0;
-      if (sameAnchoredRoute || weakReturnContinuation) previous.push(...group);
+      const previousCaptureOrder = previous.at(-1)?.captureOrder;
+      const currentCaptureOrder = group[0]?.captureOrder;
+      const adjacentCaptures = Number.isFinite(previousCaptureOrder)
+        && Number.isFinite(currentCaptureOrder)
+        && Math.abs(currentCaptureOrder - previousCaptureOrder) <= 2;
+      const g6ReturnContinuation = gap <= 120
+        && adjacentCaptures
+        && g6MainlineEvidence(previous)
+        && g6ReturnExitEvidence(group);
+      if (sameAnchoredRoute || weakReturnContinuation || g6ReturnContinuation) previous.push(...group);
       else merged.push(group);
     }
 
@@ -969,7 +988,7 @@ function repairContextTimes(photos) {
 }
 
 const SESSION_START_PLACES = {
-  g6: new Set(["同仁路口驶入高速", "朝阳立交", "柴达木路高速路口"]),
+  g6: new Set(["同仁路口驶入高速", "朝阳立交"]),
   west: new Set(["高速入口", "西宁西方向"]),
   s101: new Set(["互助匝道入口"])
 };
@@ -1415,7 +1434,8 @@ function refineG6Turnarounds(photos) {
     "西宁东收费口"
   ]);
   const isStartEvidence = (photo) => ["同仁路口驶入高速", "高速入口"].includes(photo.place)
-    || /同仁路口.*(?:驶入|进入)|驶入高速|万方城/.test(normalizeText(photo.ocrText));
+    || /同仁路口.*(?:驶入|进入)|驶入高速|万方城|祁连路派出所/.test(normalizeText(photo.ocrText));
+  const isReturnExitEvidence = (photo) => /(?:柴|禁)达木|海湖路.{0,8}通海|塔尔寺.{0,8}祁连路/.test(normalizeText(photo.ocrText));
   const isGeneric = (photo) => !photo.manualAssignment
     && !photo.historyRecordHint
     && ["连接/待确认节点", "待确认地点", "待路径归集", "高速入口"].includes(photo.place);
@@ -1462,8 +1482,32 @@ function refineG6Turnarounds(photos) {
 
       const terminalIndex = entries.findIndex((photo, index) =>
         index > 0
-        && (photo.place === "柴达木路高速路口" || /柴达木|同仁路口.*离开/.test(normalizeText(photo.ocrText)))
+        && (photo.place === "柴达木路高速路口" || isReturnExitEvidence(photo) || /同仁路口.*离开/.test(normalizeText(photo.ocrText)))
       );
+      if (!mixedRouteSeries && terminalIndex > 0 && !entries[terminalIndex].manualAssignment) {
+        setTopologyPoint(entries[terminalIndex], {
+          pointId: "g6-chaidamu",
+          place: "柴达木路高速路口",
+          semanticPoint: "离开G6返回大队",
+          sequence: 13
+        });
+      }
+      if (!mixedRouteSeries && terminalIndex > 0) {
+        for (const photo of entries) {
+          if (
+            photo.manualAssignment
+            || photo.pointId !== "g6-haidong"
+            || photo.confidence !== "context"
+            || (photo.score ?? 0) < 94
+          ) continue;
+          setTopologyPoint(photo, {
+            pointId: "g6-haidong",
+            place: "海东主线收费站",
+            semanticPoint: "海东主线收费站",
+            sequence: 7
+          });
+        }
+      }
       const endIndex = terminalIndex >= 0 ? terminalIndex : entries.length;
       const interior = entries.slice(1, endIndex);
       for (let index = 1; index < entries.length - 1; index += 1) {

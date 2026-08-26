@@ -1,6 +1,6 @@
 {
   "name": "qh-duty-desk",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "韵家口大队巡查记录工作台",
   "author": {
     "name": "blingcc",
@@ -42,12 +42,15 @@
   },
   "devDependencies": {
     "electron": "22.3.27",
-    "electron-builder": "26.0.12",
+    "electron-builder": "26.15.3",
     "vite": "^8.1.0"
   },
   "build": {
     "appId": "cn.qh.yunjiaokou.patrol-desk",
     "productName": "韵家口巡查工作台",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "asar": true,
     "asarUnpack": [
       "server/**/*",
@@ -102,12 +105,6 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
           "arch": [
             "arm64"
           ]
