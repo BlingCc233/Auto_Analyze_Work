@@ -49,7 +49,9 @@ sed -i 's/ -lmimalloc//' \
   ARCH=aarch64 scripts/docker/build-with-docker.sh
 )
 
-runtime="$work_dir/type2-runtime/out/runtime-aarch64"
+# The upstream Docker wrapper bind-mounts the caller directory at /ws/out, so
+# build-runtime.sh writes the architecture-suffixed runtime at the repository root.
+runtime="$work_dir/type2-runtime/runtime-aarch64"
 test -x "$runtime"
 if readelf -l "$runtime" | grep -q 'Requesting program interpreter'; then
   echo "::error title=Invalid AppImage runtime::Custom AppImage runtime must be statically linked." >&2
