@@ -15,6 +15,14 @@ work_dir="$(mktemp -d)"
 cleanup() {
   rm -rf -- "$work_dir"
 }
+report_error() {
+  local status=$?
+  local source_file="${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}"
+  local source_line="${BASH_LINENO[0]:-unknown}"
+  echo "::error title=ARMv8 AppImage runtime build failed::${source_file}:${source_line} exited with status ${status}"
+  exit "$status"
+}
+trap report_error ERR
 trap cleanup EXIT
 
 mkdir -p "$output_dir"
@@ -44,12 +52,14 @@ sed -i 's/ -lmimalloc//' \
 runtime="$work_dir/type2-runtime/out/runtime-aarch64"
 test -x "$runtime"
 if readelf -l "$runtime" | grep -q 'Requesting program interpreter'; then
-  echo "Custom AppImage runtime must be statically linked." >&2
+  echo "::error title=Invalid AppImage runtime::Custom AppImage runtime must be statically linked." >&2
   exit 1
 fi
-if llvm-objdump --triple=aarch64 --disassemble "$runtime" \
-  | grep -Eiq '[[:space:]](cas[a-z]*|ldadd[a-z]*|swp[a-z]*)[[:space:]]'; then
-  echo "Custom AppImage runtime contains unsupported ARM LSE instructions." >&2
+lse_instruction="$(llvm-objdump --triple=aarch64 --disassemble "$runtime" \
+  | grep -Ei '[[:space:]](cas[a-z]*|ldadd[a-z]*|swp[a-z]*)[[:space:]]' \
+  | head -n 1 || true)"
+if [[ -n "$lse_instruction" ]]; then
+  echo "::error title=Unsupported ARM LSE instruction::${lse_instruction}" >&2
   exit 1
 fi
 
