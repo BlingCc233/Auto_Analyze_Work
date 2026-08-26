@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.0.8
+        description: Release tag, for example v0.0.7
         required: true
-        default: v0.0.8
+        default: v0.0.7
         type: string
 
 permissions:
@@ -180,12 +180,16 @@ jobs:
       - name: Verify static AppImage runtime extraction
         run: |
           appimage="dist/Yunjiaokou-Patrol-${RELEASE_TAG}-Linux-aarch64.AppImage"
+          runtime="${GITHUB_WORKSPACE}/.ci/appimage-tools/runtimes/runtime-arm64"
           test -f "$appimage"
-          if readelf -l "$appimage" | grep -q 'Requesting program interpreter'; then
+          test -x "$runtime"
+          runtime_size="$(stat --format=%s "$runtime")"
+          cmp --bytes="$runtime_size" "$runtime" "$appimage"
+          if readelf -l "$runtime" | grep -q 'Requesting program interpreter'; then
             echo "AppImage runtime must be statically linked." >&2
             exit 1
           fi
-          if llvm-objdump --triple=aarch64 --disassemble "$appimage" \
+          if llvm-objdump --triple=aarch64 --disassemble "$runtime" \
             | grep -Eiq '[[:space:]](cas[a-z]*|ldadd[a-z]*|swp[a-z]*)[[:space:]]'; then
             echo "AppImage runtime must not contain ARM LSE instructions." >&2
             exit 1
@@ -230,15 +234,8 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            obsolete_asset_id="$(
-              gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-                --jq ".assets[] | select(.name == \"Yunjiaokou-Patrol-${TAG}-Win7-x64.exe\") | .id"
-            )"
-            if [ -n "$obsolete_asset_id" ]; then
-              gh api \
-                --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${obsolete_asset_id}"
-            fi
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[].id' \
+              | xargs -r -I{} gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/{}"
             gh release upload "$TAG" release-files/* --clobber
           else
             gh release create "$TAG" release-files/* \

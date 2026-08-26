@@ -22,11 +22,19 @@ git clone --quiet --depth 1 --branch 20251108 \
   https://github.com/AppImage/type2-runtime.git "$work_dir/type2-runtime"
 git -C "$work_dir/type2-runtime" rev-parse HEAD | grep -qx "$runtime_revision"
 
-# Keep every statically linked component within the ARMv8.0 baseline.
+# Keep every statically linked component within the ARMv8.0 baseline. The
+# upstream dependency script sets CFLAGS only after building libfuse, so place
+# ours before its first compilation instead.
 sed -i 's/-std=gnu99 /-std=gnu99 -march=armv8-a -mno-outline-atomics /' \
   "$work_dir/type2-runtime/src/runtime/Makefile"
-sed -i 's/export CFLAGS="/export CFLAGS="-march=armv8-a -mno-outline-atomics /' \
+sed -i '4a export CFLAGS="-march=armv8-a -mno-outline-atomics -ffunction-sections -fdata-sections -Os"' \
   "$work_dir/type2-runtime/scripts/common/install-dependencies.sh"
+sed -i 's/export CFLAGS="-ffunction-sections -fdata-sections -Os"/export CFLAGS="-march=armv8-a -mno-outline-atomics -ffunction-sections -fdata-sections -Os"/' \
+  "$work_dir/type2-runtime/scripts/common/install-dependencies.sh"
+# Alpine's prebuilt mimalloc archive is outside this controlled compilation
+# path. The runtime does not call its API, so use libc allocation instead.
+sed -i 's/ -lmimalloc//' \
+  "$work_dir/type2-runtime/src/runtime/Makefile"
 
 (
   cd "$work_dir/type2-runtime"
