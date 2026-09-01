@@ -56,6 +56,21 @@ test("repairs a fused date separator and E used as a clock colon", () => {
   assert.equal(result.timeOcrText, "09:20");
 });
 
+test("uses the focused clock when a malformed date cannot define a watermark region", () => {
+  const result = formatPpOcrResult({
+    engine: "ppocrv6-tiny-wasm",
+    width: 2275,
+    height: 1280,
+    confidence: 0.9,
+    lines: [
+      { text: "[20208-37", score: 0.92, x: 200, y: 810 },
+      { text: "海东市 G0611张汶高速", score: 0.91, x: 200, y: 905 }
+    ],
+    timeLines: [{ text: "9.40", score: 0.86, x: 0, y: 780 }]
+  });
+  assert.equal(result.timeOcrText, "09:40");
+});
+
 test("PP-OCRv6 WASM reads a historical patrol watermark without native Paddle", {
   timeout: 30_000
 }, async () => {

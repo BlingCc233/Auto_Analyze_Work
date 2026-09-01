@@ -351,6 +351,33 @@ test("resolves the 2026-08-04 western patrol from watermark evidence and topolog
   assert.doesNotMatch(draft.narrative, /巡查至连接段/);
 });
 
+test("repairs an isolated clock rollback from sequence evidence without historical records", () => {
+  const samples = [
+    ["微信图片_20260910100000_310_70.jpg", "09:20 2026-09-10 西宁市 S1113宁贵高速 大通 湟源", "09:20"],
+    ["微信图片_20260910100001_311_70.jpg", "06:11 2026-09-10 海东市 G0611张汶高速 收费站", "06:11"],
+    ["微信图片_20260910100002_312_70.jpg", "10:01 2026-09-10 海东市 东部农副产品综合市场 ETC 收费站", "10:01"],
+    ["微信图片_20260910100003_313_70.jpg", "10:19 2026-09-10 海东市 G6京藏高速", "10:19"],
+    ["微信图片_20260910100004_314_70.jpg", "11:27 2026-09-10 西宁市 北禅路 通海路", "11:27"]
+  ];
+  const resolved = resolvePhotoAssignments(samples.map(([fileName, ocrText, timeOcrText]) =>
+    classifyImage({ fileName, ocrText, timeOcrText })
+  ));
+
+  assert.deepEqual(
+    resolved.map((photo) => [photo.time, photo.routeKey, photo.place, photo.confidence]),
+    [
+      ["09:20", "g6", "同仁路口驶入高速", "topology"],
+      ["09:41", "g6", "海东主线收费站", "topology"],
+      ["10:01", "g6", "平安收费站", "topology"],
+      ["10:19", "g6", "海东主线收费站", "topology"],
+      ["11:27", "g6", "柴达木路高速路口", "topology"]
+    ]
+  );
+  assert.equal(resolved[1].timeEstimated, true);
+  assert.equal(new Set(resolved.map((photo) => photo.patrolGroup)).size, 1);
+  assert.equal(routeReadiness("g6", resolved).ready, true);
+});
+
 test("infers a route record window from the first and last included photos", () => {
   assert.deepEqual(inferRouteTimeRange("g6", [
     { routeKey: "g6", include: true, time: "08:57" },

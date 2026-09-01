@@ -257,15 +257,21 @@ async function recognizeDirectCrop(runtime, image, {
   };
 }
 
-function cropWatermarkClock(image) {
-  const x2 = Math.floor(image.width * 0.42);
-  const y1 = Math.floor(image.height * 0.50);
-  const y2 = Math.floor(image.height * 0.68);
-  const width = x2;
-  const height = y2 - y1;
+function cropWatermarkClock(image, {
+  x1 = 0,
+  y1 = 0.50,
+  x2 = 0.42,
+  y2 = 0.68
+} = {}) {
+  const left = Math.max(0, Math.floor(image.width * x1));
+  const top = Math.max(0, Math.floor(image.height * y1));
+  const right = Math.min(image.width, Math.ceil(image.width * x2));
+  const bottom = Math.min(image.height, Math.ceil(image.height * y2));
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
   const data = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y += 1) {
-    const sourceStart = ((y + y1) * image.width) * 4;
+    const sourceStart = ((y + top) * image.width + left) * 4;
     data.set(image.data.subarray(sourceStart, sourceStart + width * 4), y * width * 4);
   }
   return { width, height, data };
@@ -281,24 +287,41 @@ export async function recognizePpOcrWasm(buffer, mimeType, {
   });
   const runtime = await runtimePromise;
   const image = decodeImage(buffer, mimeType);
-  const [lines, detectedTimeLines, ...directTimeLines] = await Promise.all([
+  const [lines, detectedTimeLines, focusedTimeLines, ...directTimeLines] = await Promise.all([
     recognizeRegion(runtime, image),
     recognizeRegion(runtime, cropWatermarkClock(image)),
+    // The large clock sits below the date on recent watermark layouts. Keep
+    // this crop independent so date/weather text cannot become a clock value.
+    recognizeRegion(runtime, cropWatermarkClock(image, {
+      x1: 0,
+      y1: 0.60,
+      x2: 0.14,
+      y2: 0.79
+    })),
+    recognizeDirectCrop(runtime, image, {
+      x1: 0,
+      y1: 0.61,
+      x2: 0.11,
+      y2: 0.78
+    }),
+    recognizeDirectCrop(runtime, image, {
+      x1: 0,
+      y1: 0.58,
+      x2: 0.18,
+      y2: 0.79
+    }),
+    // Older watermark templates place the clock above the recent layout.
+    // Keep it after the targeted crops so it can only supply a fallback.
     recognizeDirectCrop(runtime, image, {
       x1: 0,
       y1: 0.56,
       x2: 0.17,
       y2: 0.68
-    }),
-    recognizeDirectCrop(runtime, image, {
-      x1: 0,
-      y1: 0.53,
-      x2: 0.22,
-      y2: 0.69
     })
   ]);
   const timeLines = [
     ...directTimeLines.filter(Boolean),
+    ...focusedTimeLines,
     ...detectedTimeLines
   ];
   return {

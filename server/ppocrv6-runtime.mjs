@@ -67,7 +67,12 @@ export function clockFromLines(lines = []) {
 }
 
 function isDate(text) {
-  return /20\d{2}(?:[-=./:]?\d{1,2}[-=./:]\d{1,3}|[-=./:]\d{2}[1Il]\d{2})/.test(String(text));
+  const source = String(text).replace(/[Il]/g, "1");
+  const match = source.match(/(?:^|[^\d]|1)(20\d{2})[-=./:]?(\d{1,2})[-=./:]?(\d{1,2})(?:\d)?(?!\d)/);
+  if (!match) return false;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
 
 export function spatialText(result) {

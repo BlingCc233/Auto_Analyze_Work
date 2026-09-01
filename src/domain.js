@@ -409,6 +409,49 @@ function compareContextPhotos(left, right) {
   return (left.sourceIndex ?? 0) - (right.sourceIndex ?? 0);
 }
 
+function repairIsolatedSeriesTimeOutliers(photos) {
+  const result = photos.map((photo) => ({ ...photo }));
+  const series = new Map();
+  for (const photo of result) {
+    if (!photo.sourceSeries || !Number.isFinite(photo.captureOrder)) continue;
+    if (!series.has(photo.sourceSeries)) series.set(photo.sourceSeries, []);
+    series.get(photo.sourceSeries).push(photo);
+  }
+
+  for (const entries of series.values()) {
+    entries.sort((left, right) => left.captureOrder - right.captureOrder);
+    for (let index = 1; index < entries.length - 1; index += 1) {
+      const previous = entries[index - 1];
+      const photo = entries[index];
+      const next = entries[index + 1];
+      const previousAt = minutes(previous.time);
+      const currentAt = minutes(photo.time);
+      const nextAt = minutes(next.time);
+      const contiguous = photo.captureOrder - previous.captureOrder <= 2
+        && next.captureOrder - photo.captureOrder <= 2;
+      const bracketed = Number.isFinite(previousAt)
+        && Number.isFinite(nextAt)
+        && nextAt > previousAt
+        && nextAt - previousAt <= 90;
+      const isIsolatedRollback = Number.isFinite(currentAt)
+        && currentAt < previousAt - 15
+        && currentAt < nextAt - 15;
+      const isMissing = !photo.time;
+      if (!contiguous || !bracketed || (!isIsolatedRollback && !isMissing)) continue;
+
+      const span = next.captureOrder - previous.captureOrder;
+      const ratio = (photo.captureOrder - previous.captureOrder) / span;
+      const estimated = Math.round(previousAt + (nextAt - previousAt) * ratio);
+      photo.time = clockFromMinutes(estimated);
+      photo.timeEstimated = true;
+      photo.timeCorrectionReason = isMissing
+        ? "同一连拍序列缺少水印时间，已按相邻可信时钟和拍摄序号插值。"
+        : "水印时钟与同一连拍序列的前后可信时钟发生孤立逆序，已按拍摄序号校正。";
+    }
+  }
+  return result;
+}
+
 function assignContextBatches(photos, gapMinutes = 75) {
   const result = photos.map((photo) => ({ ...photo }));
   const series = new Map();
@@ -1434,8 +1477,9 @@ function refineG6Turnarounds(photos) {
     "西宁东收费口"
   ]);
   const isStartEvidence = (photo) => ["同仁路口驶入高速", "高速入口"].includes(photo.place)
-    || /同仁路口.*(?:驶入|进入)|驶入高速|万方城|祁连路派出所/.test(normalizeText(photo.ocrText));
-  const isReturnExitEvidence = (photo) => /(?:柴|禁)达木|海湖路.{0,8}通海|塔尔寺.{0,8}祁连路/.test(normalizeText(photo.ocrText));
+    || /同仁路口.*(?:驶入|进入)|驶入高速|万方城|祁连路派出所/.test(normalizeText(photo.ocrText))
+    || /S1113宁贵高速/.test(normalizeText(photo.ocrText));
+  const isReturnExitEvidence = (photo) => /(?:柴|禁)达木|海湖路.{0,8}通海|塔尔寺.{0,8}祁连路|北禅路/.test(normalizeText(photo.ocrText));
   const isGeneric = (photo) => !photo.manualAssignment
     && !photo.historyRecordHint
     && ["连接/待确认节点", "待确认地点", "待路径归集", "高速入口"].includes(photo.place);
@@ -1730,7 +1774,9 @@ function excludePostRouteTransit(photos) {
 export function resolvePhotoAssignments(photos) {
   let classified = assignContextBatches(
     markExactOcrDuplicates(
-      photos.map((photo, sourceIndex) => ({ sourceIndex, ...photo }))
+      repairIsolatedSeriesTimeOutliers(
+        photos.map((photo, sourceIndex) => ({ sourceIndex, ...photo }))
+      )
     )
   );
   const globalContext = routeContextScores(classified);
