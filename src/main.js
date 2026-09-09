@@ -75,10 +75,10 @@ const PHOTO_EVENT_OPTIONS = [
 ];
 const PHOTO_EVENT_LABELS = Object.fromEntries(PHOTO_EVENT_OPTIONS);
 const PERSONNEL = Object.keys(OFFICIAL_PERSONNEL);
-const PATROL_VEHICLES = ["青A99R18", "青A33W69"];
+const PATROL_VEHICLES = ["青A99R18", "青A8A971"];
 const DEFAULT_OFFICERS_BY_VEHICLE = {
   "青A99R18": ["张景雲"],
-  "青A33W69": ["宁戎"]
+  "青A8A971": ["宁戎"]
 };
 const WEATHER_OPTIONS = ["晴", "多云", "阴", "小雨", "中雨", "大雨", "雪", "雾"];
 const WORKFLOW_STEPS = [
@@ -157,7 +157,7 @@ const state = {
       timeManual: false
     },
     west: {
-      vehicle: "青A33W69",
+      vehicle: "青A8A971",
       officers: ["宁戎"],
       startTime: "08:00",
       endTime: "12:00",

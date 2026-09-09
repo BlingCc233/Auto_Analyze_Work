@@ -25,7 +25,7 @@ function westDraft() {
   return buildDraft({
     date: "2026-07-26",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["宁戎", "杨富强"],
     startTime: "08:00",
     endTime: "12:00",
@@ -90,7 +90,7 @@ function july27Drafts() {
     buildDraft({
       date: "2026-07-27",
       routeKey: "west",
-      vehicle: "青A33W69",
+      vehicle: "青A8A971",
       officers: ["宁戎", "杨富强"],
       startTime: "12:56",
       endTime: "13:32",
@@ -231,7 +231,7 @@ test("updates only the uniquely matching July 27 records and keeps supplemental 
       },
       {
         scheduleId: "schedule-g6-target",
-        plateNumbers: "青A33W69",
+        plateNumbers: "青A8A971",
         lawEnforcementOfficials: "黄昇鹏;李芬红;段小燕",
         patrolRoute: "G6",
         content: "公路巡查，张贴宣传海报",
@@ -239,7 +239,7 @@ test("updates only the uniquely matching July 27 records and keeps supplemental 
       },
       {
         scheduleId: "schedule-west-target",
-        plateNumbers: "青A33W69",
+        plateNumbers: "青A8A971",
         lawEnforcementOfficials: "黄昇鹏;李芬红;马玲瑞",
         patrolRoute: "G6京藏高速公路西过境段",
         content: "公路巡查",

@@ -56,7 +56,7 @@ test("recognizes accident handling and keeps the generated narrative factual", (
   const draft = buildDraft({
     date: "2026-08-16",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["李彩燕"],
     startTime: "12:20",
     endTime: "13:10",
@@ -156,7 +156,7 @@ test("merges the western entry and Xining-west direction at the same timestamp",
   const draft = buildDraft({
     date: "2026-07-26",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["宁戎", "杨富强"],
     startTime: "08:00",
     endTime: "12:00",
@@ -182,7 +182,7 @@ test("writes a western turnaround when one toll photo is bounded by both tunnel 
   const draft = buildDraft({
     date: "2026-07-14",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["宁戎", "杨富强"],
     startTime: "10:58",
     endTime: "11:57",
@@ -340,7 +340,7 @@ test("resolves the 2026-08-04 western patrol from watermark evidence and topolog
   const draft = buildDraft({
     date: "2026-08-04",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["宁戎"],
     startTime: "08:52",
     endTime: "11:14",
@@ -833,7 +833,7 @@ test("builds a journal association draft from route drafts", () => {
   const draft = buildDraft({
     date: "2026-07-26",
     routeKey: "west",
-    vehicle: "青A33W69",
+    vehicle: "青A8A971",
     officers: ["宁戎", "杨富强"],
     startTime: "08:00",
     endTime: "12:00",
