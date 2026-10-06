@@ -45,6 +45,73 @@ function decodeCredentials() {
 
 const CREDENTIALS = decodeCredentials();
 
+// User-entered credentials live outside the application bundle. Electron's
+// safeStorage is used by the main process when available; the fallback keeps
+// the file obfuscated for platforms without a native key store.
+let userStore = null;
+
+function configureUserStore({ filePath, safeStorage } = {}) {
+  if (!filePath) throw new Error("凭据存储路径无效");
+  const fs = require("node:fs");
+  const path = require("node:path");
+  userStore = { filePath: path.resolve(filePath), safeStorage, fs };
+  return loadUserCredentials();
+}
+
+function decodeUserPayload(raw) {
+  if (!raw) return [];
+  try {
+    const value = userStore?.safeStorage?.isEncryptionAvailable?.()
+      ? userStore.safeStorage.decryptString(Buffer.from(raw, "base64"))
+      : Buffer.from(raw, "base64").toString("utf8");
+    const entries = JSON.parse(value);
+    if (!Array.isArray(entries)) return [];
+    return entries.filter((entry) => entry && String(entry.username).trim() && typeof entry.password === "string");
+  } catch {
+    return [];
+  }
+}
+
+function loadUserCredentials() {
+  if (!userStore) return [];
+  try {
+    const raw = userStore.fs.readFileSync(userStore.filePath, "utf8");
+    return decodeUserPayload(raw.trim());
+  } catch {
+    return [];
+  }
+}
+
+function saveUserCredentials(entries) {
+  if (!userStore) return;
+  const normalized = [...new Map(entries.map((entry) => [
+    String(entry.username).trim(), { username: String(entry.username).trim(), password: String(entry.password) }
+  ])).values()];
+  const plain = JSON.stringify(normalized);
+  const encoded = userStore.safeStorage?.isEncryptionAvailable?.()
+    ? userStore.safeStorage.encryptString(plain).toString("base64")
+    : Buffer.from(plain, "utf8").toString("base64");
+  userStore.fs.mkdirSync(require("node:path").dirname(userStore.filePath), { recursive: true });
+  userStore.fs.writeFileSync(userStore.filePath, encoded, { mode: 0o600 });
+}
+
+function listStoredUsernames() {
+  return loadUserCredentials().map((entry) => entry.username);
+}
+
+function findStoredCredentials(username) {
+  const normalized = String(username || "").trim();
+  return loadUserCredentials().find((entry) => entry.username === normalized) || null;
+}
+
+function rememberCredentials(username, password) {
+  const normalized = String(username || "").trim();
+  if (!normalized || !String(password || "")) return;
+  const entries = loadUserCredentials().filter((entry) => entry.username !== normalized);
+  entries.unshift({ username: normalized, password: String(password) });
+  saveUserCredentials(entries.slice(0, 50));
+}
+
 function listUsernames() {
   return CREDENTIALS.map((entry) => entry.username);
 }
@@ -58,5 +125,9 @@ function findCredentials(username) {
 module.exports = {
   CREDENTIALS,
   listUsernames,
-  findCredentials
+  findCredentials,
+  configureUserStore,
+  listStoredUsernames,
+  findStoredCredentials,
+  rememberCredentials
 };

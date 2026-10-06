@@ -10,7 +10,7 @@ const dutyDesktop = Object.freeze({
   officialRollback: (request) => ipcRenderer.invoke("official-rollback", request),
   openOfficial: () => ipcRenderer.invoke("official-open-login"),
   // 自动登录
-  officialAutoLogin: (username) => ipcRenderer.invoke("official-auto-login", { username }),
+  officialAutoLogin: (credentials) => ipcRenderer.invoke("official-auto-login", credentials),
   officialCredentials: () => ipcRenderer.invoke("official-credentials"),
   // 退出登录
   officialLogout: () => ipcRenderer.invoke("official-logout")

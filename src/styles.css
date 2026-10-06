@@ -196,7 +196,7 @@ svg {
   gap: 6px;
 }
 
-.credential-select {
+.credential-input {
   min-width: 100px;
   max-width: 150px;
   height: 32px;
@@ -207,10 +207,14 @@ svg {
   border-radius: 5px;
   background: #ffffff;
   color: var(--ink);
-  cursor: pointer;
 }
 
-.credential-select:focus {
+.credential-password {
+  min-width: 86px;
+  max-width: 112px;
+}
+
+.credential-input:focus {
   border-color: var(--green);
   outline: none;
   box-shadow: 0 0 0 2px rgba(23, 99, 63, 0.12);

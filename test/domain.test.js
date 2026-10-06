@@ -746,6 +746,46 @@ test("does not discard an S1113 connector photo without route context", () => {
   assert.equal(photo.include, false);
 });
 
+test("keeps the October 6 three-route patrol as one continuous outing", () => {
+  const fixtures = [
+    ["微信图片_20261006122245_347_70.jpg", "09:09 2026-10-06 西宁市"],
+    ["微信图片_20261006122248_348_70.jpg", "09:28 2026-10-06 西宁市 毛纺小区"],
+    ["微信图片_20261006122250_349_70.jpg", "09:32 2026-10-06 西宁市公安局考试中心"],
+    ["微信图片_20261006122251_350_70.jpg", "09:50 2026-10-06 西宁市 西互高速 医助南收费站"],
+    ["微信图片_20261006122253_351_70.jpg", "10:07 2026-10-06 西宁市 西互高速"],
+    ["微信图片_20261006122255_352_70.jpg", "21:11 2026-10-06 西宁市 韵家口 S101出口"],
+    ["微信图片_20261006122257_353_70.jpg", "10:18 2026-10-06 海东市 G0611张汶高速"],
+    ["微信图片_20261006122258_354_70.jpg", "10:27 2026-10-06 海东市 平安区体育公园"],
+    ["微信图片_20261006122300_355_70.jpg", "10:33 2026-10-06 西宁市 西宁东收费站"],
+    ["微信图片_20261006122302_356_70.jpg", "10:48 2026-10-06 西宁市 宁瑞水乡 G6京藏高速"],
+    ["微信图片_20261006122303_357_70.jpg", "11:02 2026-10-06 西宁市 G6京藏高速 大酉山隧道"],
+    ["微信图片_20261006122305_358_70.jpg", "11:18 2026-10-06 西宁市 鲸油能源加油加气站"],
+    ["微信图片_20261006122307_359_70.jpg", "11:33 2026-10-06 西宁市 G6京藏高速"]
+  ];
+  const photos = resolvePhotoAssignments(fixtures.map(([fileName, ocrText]) =>
+    classifyImage({ fileName, ocrText })
+  ));
+  const included = photos.filter((photo) => photo.include !== false);
+  const routePhotos = (routeKey) => included.filter((photo) => photo.routeKey === routeKey);
+
+  assert.deepEqual(routePhotos("s101").map((photo) => photo.time), ["09:09", "09:28", "09:32", "09:50", "10:07"]);
+  assert.deepEqual(routePhotos("g6").map((photo) => photo.time), ["10:18", "10:27", "10:33", "10:48"]);
+  assert.deepEqual(routePhotos("west").map((photo) => [photo.time, photo.place]), [
+    ["11:02", "大酉山隧道"],
+    ["11:18", "西宁西收费站"],
+    ["11:33", "大酉山隧道"]
+  ]);
+  assert.equal(photos.find((photo) => photo.time === "21:11").include, false);
+
+  const s101Draft = buildDraft({ date: "2026-10-06", routeKey: "s101", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "09:09", endTime: "10:07", photos: routePhotos("s101"), endsAtBrigade: false });
+  const g6Draft = buildDraft({ date: "2026-10-06", routeKey: "g6", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "10:18", endTime: "10:48", photos: routePhotos("g6"), startsFromBrigade: false, endsAtBrigade: false });
+  const westDraft = buildDraft({ date: "2026-10-06", routeKey: "west", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "11:02", endTime: "11:33", photos: routePhotos("west"), startsFromBrigade: false });
+  assert.match(s101Draft.narrative, /转入后续巡查线路/);
+  assert.match(g6Draft.narrative, /承接前一段巡查/);
+  assert.match(g6Draft.narrative, /转入后续巡查线路/);
+  assert.match(westDraft.narrative, /11时33分.*返回大队/);
+});
+
 test("defers unauthorized locations to route context and excludes distant photos", () => {
   const photo = classifyImage({ fileName: "微信图片.jpg", ocrText: "18:01 未授权位置" });
   assert.equal(photo.confidence, "review");

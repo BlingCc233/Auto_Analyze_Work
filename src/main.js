@@ -136,6 +136,7 @@ const state = {
   // 自动登录
   credentialUsers: [],
   selectedCredentialUser: storedCredentialUser(),
+  credentialPassword: "",
   autoLoggingIn: false,
   loggingOut: false,
   autoLoginError: "",
@@ -253,8 +254,18 @@ function routeKeyForDraft(draft) {
 }
 
 function draftsForCurrentPhotos() {
+  const includedTimes = state.photos
+    .filter((photo) => photo.include !== false && /^\d{2}:\d{2}$/.test(photo.time || ""))
+    .map((photo) => photo.time)
+    .sort();
+  const firstTime = includedTimes[0] || "";
+  const lastTime = includedTimes.at(-1) || "";
   return ROUTE_KEYS.map((routeKey) => {
     const profile = state.routeProfiles[routeKey];
+    const routeTimes = state.photos
+      .filter((photo) => photo.routeKey === routeKey && photo.include !== false && /^\d{2}:\d{2}$/.test(photo.time || ""))
+      .map((photo) => photo.time)
+      .sort();
     const draft = buildDraft({
       date: state.date,
       routeKey,
@@ -263,7 +274,9 @@ function draftsForCurrentPhotos() {
       startTime: profile.startTime,
       endTime: profile.endTime,
       photos: state.photos,
-      confirmedCondition: state.confirmedCondition
+      confirmedCondition: state.confirmedCondition,
+      startsFromBrigade: !routeTimes.length || routeTimes[0] === firstTime,
+      endsAtBrigade: !routeTimes.length || routeTimes.at(-1) === lastTime
     });
     if (Object.hasOwn(state.narrativeOverrides, routeKey)) {
       draft.narrative = state.narrativeOverrides[routeKey];
@@ -1151,18 +1164,21 @@ async function loadCredentialUsers() {
 }
 
 async function autoLogin() {
-  if (!state.selectedCredentialUser || state.autoLoggingIn || state.running) return;
+  const username = String(state.selectedCredentialUser || "").trim();
+  const password = String(state.credentialPassword || "");
+  if (!username || !password || state.autoLoggingIn || state.running) return;
   state.autoLoggingIn = true;
   state.autoLoginError = "";
   render();
   try {
-    const result = await callDesktop("autoLogin", state.selectedCredentialUser);
+    const result = await callDesktop("autoLogin", { username, password });
     state.desktopStatus = result;
     if (result.authenticated && result.serviceReady) {
-      if (result.username && state.credentialUsers.includes(result.username)) {
-        state.selectedCredentialUser = result.username;
-      }
-      rememberCredentialUser(state.selectedCredentialUser);
+      state.selectedCredentialUser = result.username || username;
+      state.credentialUsers = [state.selectedCredentialUser, ...state.credentialUsers
+        .filter((item) => item !== state.selectedCredentialUser)];
+      rememberCredentialUser(username);
+      state.credentialPassword = "";
       await synchronizeOfficialPersonnel();
       const elapsed = Number(result.loginElapsedMs);
       const timing = Number.isFinite(elapsed)
@@ -1633,13 +1649,11 @@ function render() {
           <div><strong>韵家口巡查工作台</strong><span>巡查登记与回读核验</span></div>
         </div>
         <div class="header-status">
-          ${desktop && state.credentialUsers.length > 0 ? `
+          ${desktop ? `
           <div class="login-area">
-            <select id="credential-select" class="field-control credential-select" ${state.autoLoggingIn || state.running ? "disabled" : ""} aria-label="选择登录用户">
-              ${state.credentialUsers.map((username) =>
-                `<option value="${escapeHtml(username)}" ${state.selectedCredentialUser === username ? "selected" : ""}>${escapeHtml(username)}</option>`
-              ).join("")}
-            </select>
+            <input id="credential-user" class="field-control credential-input" list="credential-users" value="${escapeHtml(state.selectedCredentialUser)}" placeholder="登录账号" autocomplete="username" ${state.autoLoggingIn || state.running ? "disabled" : ""} aria-label="登录账号">
+            <datalist id="credential-users">${state.credentialUsers.map((username) => `<option value="${escapeHtml(username)}"></option>`).join("")}</datalist>
+            <input id="credential-password" class="field-control credential-input credential-password" type="password" value="${escapeHtml(state.credentialPassword)}" placeholder="密码" autocomplete="current-password" ${state.autoLoggingIn || state.running ? "disabled" : ""} aria-label="登录密码">
             ${state.desktopStatus?.authenticated ? `
             <span class="session-state online" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:100px;font-size:13px;font-weight:500;white-space:nowrap">
               <span class="session-dot"></span>${escapeHtml(statusLabel())}
@@ -1666,7 +1680,7 @@ function render() {
             ${desktop ? icon("external-link", 14) : ""}
           </button>
           `}
-          <span class="security-state">${icon("lock-keyhole", 14)}凭据不保存</span>
+          <span class="security-state">${icon("lock-keyhole", 14)}登录成功后保存账号</span>
           ${state.autoLoginError ? `<span class="auto-login-error" title="${escapeHtml(state.autoLoginError)}">${icon("alert-circle", 14)}</span>` : ""}
         </div>
       </header>
@@ -1953,20 +1967,12 @@ function bind() {
     }
   });
 
-  // 自动登录：用户选择下拉
-  $("#credential-select")?.addEventListener("change", async (event) => {
-    const previousUsername = state.desktopStatus?.username || "";
+  $("#credential-user")?.addEventListener("input", (event) => {
     state.selectedCredentialUser = event.target.value;
     rememberCredentialUser(state.selectedCredentialUser);
-    render();
-    if (
-      state.desktopStatus?.authenticated
-      && state.desktopStatus?.serviceReady
-      && previousUsername !== state.selectedCredentialUser
-    ) {
-      addActivity(`正在切换登录账号：${previousUsername || "当前账号"} → ${state.selectedCredentialUser}`);
-      await autoLogin();
-    }
+  });
+  $("#credential-password")?.addEventListener("input", (event) => {
+    state.credentialPassword = event.target.value;
   });
 
   // 自动登录：一键登录按钮
@@ -1976,7 +1982,8 @@ function bind() {
   $("#manual-login-btn")?.addEventListener("click", async () => {
     try {
       await callDesktop("openLogin", {
-        username: state.selectedCredentialUser
+        username: state.selectedCredentialUser,
+        password: state.credentialPassword
       });
       showToast(`已填写 ${state.selectedCredentialUser}，请完成滑块`);
     } catch (error) {

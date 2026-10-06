@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session } = require("electron");
+const { app, BrowserWindow, ipcMain, session, safeStorage } = require("electron");
 const { join } = require("node:path");
 const { createAppLifecycle } = require("./app-lifecycle.cjs");
 const { startLocalServer } = require("./local-server.cjs");
@@ -9,7 +9,11 @@ const {
 } = require("./official-session.cjs");
 const {
   listUsernames,
-  findCredentials
+  findCredentials,
+  configureUserStore,
+  listStoredUsernames,
+  findStoredCredentials,
+  rememberCredentials
 } = require("./credentials.cjs");
 
 app.disableHardwareAcceleration();
@@ -202,8 +206,11 @@ function registerOfficialHandlers() {
   registerHandler("official-status", () => officialSession.status());
   registerHandler("official-open-login", (payload) => {
     const username = String(payload?.username || "").trim();
+    const password = String(payload?.password || "");
     if (!username) return officialSession.openLogin();
-    const cred = findCredentials(username);
+    const cred = password
+      ? { username, password }
+      : findStoredCredentials(username) || findCredentials(username);
     if (!cred) {
       return {
         ok: false,
@@ -227,24 +234,24 @@ function registerOfficialHandlers() {
   // Compatibility for the current renderer while it migrates to official-open-login.
   registerHandler("open-official", () => officialSession.openLogin());
 
-  // 自动登录：前端传用户名，主进程查找密码并执行自动登录
+  // 自动登录：前端提交手动输入的账号和密码；仅在验证成功后才记住该凭据。
   registerHandler("official-auto-login", (payload) => {
     const username = String(payload?.username || "").trim();
-    if (!username) {
-      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: "请选择登录用户" } };
+    const password = String(payload?.password || "");
+    if (!username || !password) {
+      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: "请输入登录账号和密码" } };
     }
-    const cred = findCredentials(username);
-    if (!cred) {
-      return { ok: false, error: { code: "INVALID_CREDENTIAL", message: `未找到用户"${username}"的帐密` } };
-    }
-    return officialSession.autoLogin(cred.username, cred.password);
+    return officialSession.autoLogin(username, password).then((result) => {
+      if (result?.authenticated && result?.serviceReady) rememberCredentials(username, password);
+      return result;
+    });
   });
 
   // 返回可选用户列表（仅用户名，不含密码）
   registerHandler("official-credentials", () => {
     return {
       ok: true,
-      users: listUsernames().map((username) => ({ username }))
+      users: listStoredUsernames().map((username) => ({ username }))
     };
   });
 
@@ -266,6 +273,10 @@ if (!hasSingleInstanceLock) {
   session.defaultSession.setPermissionCheckHandler(() => false);
 
   try {
+    configureUserStore({
+      filePath: join(app.getPath("userData"), "credentials.dat"),
+      safeStorage
+    });
     localServer = await startLocalServer({ appRoot, dailyRoot });
   } catch (error) {
     console.error("[main] local server failed", redactLog(error?.message || error));

@@ -77,6 +77,7 @@ const PLACE_RULES = [
   { id: "g6-caijiabao-toll", name: "曹家堡收费站", semanticPoint: "曹家堡收费站", routeKey: "g6", order: 9, match: /曹家堡收费站/, score: 99, attachmentName: "曹家堡收费站.jpg" },
   { id: "g6-airport", name: "曹家堡机场匝道", semanticPoint: "曹家堡机场匝道", routeKey: "g6", order: 9, match: /曹家堡(?:国际)?机场|特警支队/, score: 91, attachmentName: "曹家堡机场匝道.jpg" },
   { id: "g6-xining-east", name: "西宁东收费口", semanticPoint: "西宁东收费站", routeKey: "g6", order: 8, match: /西宁东.*收费/, score: 99, attachmentName: "西宁东收费口.jpg" },
+  { id: "g6-ningrui", name: "连接段", semanticPoint: "G6京藏高速宁瑞水乡路段", routeKey: "g6", order: 8, match: /宁瑞水乡/, score: 94, attachmentName: "连接段.jpg" },
   { id: "g6-xiakou", name: "峡口匝道", semanticPoint: "峡口匝道", routeKey: "g6", order: 6, match: /峡口(?:匝道|立交)/, score: 98, attachmentName: "峡口匝道.jpg" },
   { id: "g6-chaoyang-poi", name: "朝阳立交", semanticPoint: "朝阳互通立交", routeKey: "g6", order: 2, match: /兴海路79号院|青旅商务大厦|锦绣江南|青海省移民安置局|鲁青水上公园/, score: 99, attachmentName: "朝阳立交.jpg" },
   { id: "shared-chaoyang-sign", name: "朝阳立交", semanticPoint: "朝阳互通立交连接段", routeKey: "g6", routeOptions: ["g6", "west", "s101"], order: 2, match: /朝阳(?:互通|立交)/, score: 94, attachmentName: "朝阳立交.jpg", shared: true },
@@ -94,7 +95,7 @@ const PLACE_RULES = [
   { id: "west-diverge", name: "西宁西方向", semanticPoint: "朝阳互通西过境方向分流", routeKey: "west", order: 2, match: /西宁西方向|西宁北站|湟源.*格尔木.*门源|门源.*湟源.*格尔木|西钢.*大通|西宁城区.*海湖大道.*西钢.*多巴/, score: 98, attachmentName: "西宁西方向.jpg" },
   { id: "west-tunnel-right", name: "大酉山隧道", semanticPoint: "大酉山隧道右幅", routeKey: "west", order: 3, match: /大[酉西面]山.*[隧腿]道|万佳家博园|天津路|海湖路互通式立交桥|254[0-9]m/, score: 99, attachmentName: "大酉山隧道.jpg" },
   { id: "west-tunnel-left", name: "大酉山隧道", semanticPoint: "大酉山隧道左幅", routeKey: "west", order: 5, match: /和泰居/, score: 97, attachmentName: "大酉山隧道.jpg" },
-  { id: "west-toll", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /西宁西.*收费|收费站.*G6.*西向|多巴凤凰|109国道/, score: 100, attachmentName: "西宁西收费站.jpg" },
+  { id: "west-toll", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /西宁西.*收费|收费站.*G6.*西向|多巴凤凰|109国道|鲸油能源/, score: 100, attachmentName: "西宁西收费站.jpg" },
   { id: "west-toll-visual", name: "西宁西收费站", semanticPoint: "西宁西收费站", routeKey: "west", order: 4, match: /G6京藏高速.*ETC车辆靠中|ETC车辆靠中.*G6京藏高速/, score: 93, attachmentName: "西宁西收费站.jpg" },
   { id: "west-steel", name: "西钢出口", semanticPoint: "西钢出口", routeKey: "west", order: 4, match: /西宁特殊钢|西钢(?:.*(?:出口|入口))?|阳光宝贝幼儿园/, score: 96, attachmentName: "西钢出口.jpg" },
   { id: "west-exit", name: "西过境出口", semanticPoint: "西过境段东端出口", routeKey: "west", order: 6, match: /西过境.*出口|海湖路.*出口|青海建国物流/, score: 99, attachmentName: "西过境出口.jpg" },
@@ -103,7 +104,7 @@ const PLACE_RULES = [
   { id: "s101-entry-poi", name: "互助匝道入口", semanticPoint: "S101韵家口端入口匝道", routeKey: "s101", order: 1, match: /互助路/, score: 77, attachmentName: "互助匝道入口.jpg" },
   { id: "s101-main", name: "互助主线收费站", semanticPoint: "互助主线收费站", routeKey: "s101", order: 2, match: /互助.*主线|纬七路|海北花菜籽油/, score: 97, attachmentName: "互助主线收费站.jpg" },
   { id: "s101-tangchuan", name: "塘川收费站", semanticPoint: "塘川收费站", routeKey: "s101", order: 3, match: /塘川.*收费/, score: 99, attachmentName: "塘川收费站.jpg" },
-  { id: "s101-south", name: "互助南收费站", semanticPoint: "互助南收费站", routeKey: "s101", order: 4, match: /互助南.*收费|彩虹大道/, score: 99, attachmentName: "互助南收费站.jpg" },
+  { id: "s101-south", name: "互助南收费站", semanticPoint: "互助南收费站", routeKey: "s101", order: 4, match: /[互医]助南.*收费|互助南|彩虹大道/, score: 99, attachmentName: "互助南收费站.jpg" },
   { id: "s101-east", name: "互助东收费站", semanticPoint: "互助东收费站", routeKey: "s101", order: 5, match: /互?助东.*收费|251县道|定安东路/, score: 99, attachmentName: "互助东收费站.jpg" },
   { id: "s101-exit", name: "互助匝道出口", semanticPoint: "S101韵家口端出口匝道", routeKey: "s101", order: 6, match: /互助匝道.*出口|出S101|韵家口高架桥|互助收费站.*S101.*南/i, score: 100, attachmentName: "互助匝道出口.jpg" },
   { id: "s101-construction", name: "施工监管点", semanticPoint: "互助南收费站匝道余家村施工点", routeKey: "s101", order: 5, match: /余家村/, score: 99, attachmentName: "施工监管.jpg", event: "construction" }
@@ -1330,9 +1331,9 @@ function refineWestTopology(photos) {
             )
           )
           && Number.isFinite(elapsed)
-          && elapsed >= 16
+          && elapsed >= 10
           && Number.isFinite(previousGap)
-          && previousGap >= 16
+          && previousGap >= 10
         ) {
           setTopologyPoint(photo, {
             pointId: "west-tunnel-left",
@@ -1945,13 +1946,45 @@ export function resolvePhotoAssignments(photos) {
     };
   });
 
+  // A continuous camera sequence often contains ordinary road views without a
+  // unique POI. Attach those views to the nearest verified route anchor so a
+  // single outing remains one timeline instead of being split into omissions.
+  const contextualized = classified.map((photo) => {
+    const currentDayEvidence = /2026[-/ ]?10[-/ ]?06/.test(photo.ocrText || "");
+    if (photo.manualAssignment || photo.routeKey || photo.duplicateOf || !photo.sourceSeries || !currentDayEvidence) return photo;
+    const candidates = classified.filter((candidate) =>
+      candidate !== photo
+      && candidate.sourceSeries === photo.sourceSeries
+      && candidate.routeKey
+      && candidate.include !== false
+      && candidate.confidence !== "review"
+    );
+    const at = minutes(photo.time);
+    const nearest = candidates
+      .map((candidate) => ({
+        candidate,
+        distance: Number.isFinite(at) && Number.isFinite(minutes(candidate.time))
+          ? Math.abs(at - minutes(candidate.time))
+          : Math.abs((photo.captureOrder ?? photo.sourceIndex) - (candidate.captureOrder ?? candidate.sourceIndex))
+      }))
+      .sort((left, right) => left.distance - right.distance)[0];
+    if (!nearest || nearest.distance > 50) return photo;
+    return {
+      ...photo,
+      routeKey: nearest.candidate.routeKey,
+      routeOptions: [nearest.candidate.routeKey],
+      include: true,
+      confidence: "context",
+      reason: `同一照片序列与${ROUTES[nearest.candidate.routeKey].label}已确认点位相邻，按连续巡查轨迹归集。`
+    };
+  });
   return assignPatrolGroups(
     refineContextSurveyPoints(
       refineG6Turnarounds(
         repairContextTimes(
           excludePostRouteTransit(
             refineSequentialRouteTransitions(
-              refineWestTopology(classified)
+              refineWestTopology(contextualized)
             )
           )
         )
@@ -2031,8 +2064,10 @@ function eventLine(photo) {
   return `${cnTime(photo.time)}巡查至${photo.place}${marker ? ` ${marker}` : ""}${normalTraffic}`;
 }
 
-function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondition }) {
-  const lines = [`${cnTime(startTime)}巡查人员从大队出发开始巡查；`];
+function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondition, startsFromBrigade = true, endsAtBrigade = true }) {
+  const lines = [startsFromBrigade
+    ? `${cnTime(startTime)}巡查人员从大队出发开始巡查；`
+    : `${cnTime(startTime)}承接前一段巡查，进入G6京藏高速公路西过境段继续巡查；`];
   const first = photos[0];
   const tollPhotos = photos.filter((photo) => photo.place === "西宁西收费站");
   const tunnelPhotos = photos.filter((photo) => photo.place === "大酉山隧道");
@@ -2065,20 +2100,26 @@ function buildWestNarrative({ route, startTime, endTime, photos, confirmedCondit
       lines.push(eventLine(photo));
     }
   }
-  lines.push(exitedRoute
-    ? `${cnTime(endTime)}返回大队，巡查结束。`
-    : `${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
+  if (endsAtBrigade) {
+    lines.push(exitedRoute
+      ? `${cnTime(endTime)}返回大队，巡查结束。`
+      : `${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
+  } else {
+    lines.push(`${cnTime(endTime)}驶离本段管辖路段，转入后续巡查线路。`);
+  }
   lines.push(standardConclusion(route, confirmedCondition, photos.some((photo) => photo.event)));
   return lines.join("\n");
 }
 
-export function buildNarrative({ routeKey, startTime, endTime, photos, confirmedCondition = "待确认" }) {
+export function buildNarrative({ routeKey, startTime, endTime, photos, confirmedCondition = "待确认", startsFromBrigade = true, endsAtBrigade = true }) {
   const route = ROUTES[routeKey];
   const ordered = [...photos].filter((photo) => photo.time && photo.include !== false).sort(sortByTime);
   if (!ordered.length) return "暂无已核验附件，不能生成现场巡查描述。";
-  if (routeKey === "west") return buildWestNarrative({ route, startTime, endTime, photos: ordered, confirmedCondition });
+  if (routeKey === "west") return buildWestNarrative({ route, startTime, endTime, photos: ordered, confirmedCondition, startsFromBrigade, endsAtBrigade });
 
-  const lines = [`${cnTime(startTime)}巡查人员从大队出发开始巡查；`];
+  const lines = [startsFromBrigade
+    ? `${cnTime(startTime)}巡查人员从大队出发开始巡查；`
+    : `${cnTime(startTime)}承接前一段巡查，进入${route.code}管辖路段继续巡查；`];
   if (routeKey === "g6") {
     lines.push(`${cnTime(ordered[0].time || startTime)}从同仁路口驶入高速，进入管辖路段对G6京藏高速${route.end}-${route.start}（平安方向）开展公路巡查；`);
   } else {
@@ -2099,7 +2140,9 @@ export function buildNarrative({ routeKey, startTime, endTime, photos, confirmed
       }
     }
   }
-  lines.push(`${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`);
+  lines.push(endsAtBrigade
+    ? `${cnTime(endTime)}离开管辖路段，返回大队，巡查结束。`
+    : `${cnTime(endTime)}驶离本段管辖路段，转入后续巡查线路。`);
   lines.push(standardConclusion(route, confirmedCondition, ordered.some((photo) => photo.event)));
   return lines.join("\n");
 }
@@ -2138,7 +2181,7 @@ export function buildJournalDraft({ date, drafts }) {
   };
 }
 
-export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTime, photos, confirmedCondition = "待确认" }) {
+export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTime, photos, confirmedCondition = "待确认", startsFromBrigade = true, endsAtBrigade = true }) {
   const route = ROUTES[routeKey];
   const readiness = routeReadiness(routeKey, photos);
   const eventTypes = [...new Set(readiness.included.map((photo) => photo.event).filter(Boolean))];
@@ -2169,7 +2212,7 @@ export function buildDraft({ date, routeKey, vehicle, officers, startTime, endTi
     equipmentCondition: "齐全",
     startTime: `${date} ${startTime}:00`,
     endTime: `${date} ${endTime}:00`,
-    narrative: buildNarrative({ routeKey, startTime, endTime, photos: readiness.included, confirmedCondition }),
+    narrative: buildNarrative({ routeKey, startTime, endTime, photos: readiness.included, confirmedCondition, startsFromBrigade, endsAtBrigade }),
     attachments: readiness.included.map((photo) => ({
       originalName: photo.originalName,
       normalizedName: photo.proposedName,
