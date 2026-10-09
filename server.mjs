@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { basename, extname, join, normalize, resolve } from "node:path";
+import { basename, extname, join, normalize, resolve, sep } from "node:path";
 import { createServer as createViteServer } from "vite";
 import {
   CdpOfficialBridge,
@@ -14,6 +14,9 @@ const dailyRoot = resolve(root, "daily");
 const images = new Set([".jpg", ".jpeg", ".png"]);
 const officialBridge = new CdpOfficialBridge();
 const MAX_JSON_BYTES = 80 * 1024 * 1024;
+const port = Number(process.env.PORT || 5173);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT");
+const localHost = `127.0.0.1:${port}`;
 
 function businessDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -44,13 +47,13 @@ function assertSameOrigin(request) {
   const host = String(request.headers.host || "");
   const origin = String(request.headers.origin || "");
   const fetchSite = String(request.headers["sec-fetch-site"] || "");
-  if (!/^127\.0\.0\.1:5173$/.test(host)) {
+  if (host !== localHost) {
     const error = new Error("拒绝未知Host");
     error.code = "UNTRUSTED_LOCAL_REQUEST";
     throw error;
   }
   if (request.method !== "GET" && (
-    origin !== "http://127.0.0.1:5173"
+    origin !== `http://${localHost}`
     || (fetchSite && fetchSite !== "same-origin")
   )) {
     const error = new Error("拒绝非同源自动化请求");
@@ -97,7 +100,7 @@ const officialOperations = new Map([
 function safeDailyFile(pathname) {
   const relative = normalize(decodeURIComponent(pathname.replace(/^\/daily\//, ""))).replace(/^(\.\.(\/|\\|$))+/, "");
   const filePath = resolve(dailyRoot, relative);
-  return filePath.startsWith(`${dailyRoot}/`) ? filePath : null;
+  return filePath.startsWith(`${dailyRoot}${sep}`) ? filePath : null;
 }
 
 const vite = await createViteServer({
@@ -138,7 +141,7 @@ createServer(async (request, response) => {
 
     try {
       const directory = resolve(dailyRoot, folder);
-      if (!directory.startsWith(`${dailyRoot}/`)) return json(response, 400, { error: "无效目录" });
+      if (!directory.startsWith(`${dailyRoot}${sep}`)) return json(response, 400, { error: "无效目录" });
       const entries = await readdir(directory, { withFileTypes: true });
       const files = entries
         .filter((entry) => entry.isFile() && images.has(extname(entry.name).toLowerCase()))
@@ -170,8 +173,8 @@ createServer(async (request, response) => {
   }
 
   vite.middlewares(request, response);
-}).listen(5173, "127.0.0.1", () => {
-  console.log("巡查工作台: http://127.0.0.1:5173/");
+}).listen(port, "127.0.0.1", () => {
+  console.log(`巡查工作台: http://${localHost}/`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

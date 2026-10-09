@@ -4,6 +4,7 @@ dist/
 data/*
 !data/recent-daily-ground-truth.json
 !data/recent-daily-ppocrv6-ocr.json
+!data/october-09-ppocrv6-ocr.json
 .DS_Store
 .chrome-official-profile/
 .chrome-login-profile/

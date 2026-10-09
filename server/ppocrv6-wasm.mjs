@@ -319,6 +319,27 @@ export async function recognizePpOcrWasm(buffer, mimeType, {
       y2: 0.68
     })
   ]);
+  // Small road signs lose detail when the full photo is reduced to DET_SIZE.
+  // Overlapping scene crops retain their native resolution and omit the clock.
+  if (image.width >= 1600 && image.width > image.height) {
+    for (const [x1, x2] of [[0, 0.55], [0.45, 1]]) {
+      const y1 = 0.16;
+      const scene = cropWatermarkClock(image, { x1, y1, x2, y2: 0.62 });
+      const sceneLines = await recognizeRegion(runtime, scene);
+      for (const line of sceneLines) {
+        const translated = {
+          ...line,
+          x: line.x + Math.floor(image.width * x1),
+          y: line.y + Math.floor(image.height * y1)
+        };
+        if (!lines.some((existing) =>
+          existing.text === translated.text
+          && Math.abs(existing.x - translated.x) < 40
+          && Math.abs(existing.y - translated.y) < 40
+        )) lines.push(translated);
+      }
+    }
+  }
   const timeLines = [
     ...directTimeLines.filter(Boolean),
     ...focusedTimeLines,

@@ -48,6 +48,7 @@ import {
   inferRouteTimeRange,
   placeAssignment,
   resolvePhotoAssignments,
+  summarizePatrolWeather,
   toDisplayDate,
   weatherFromOcr
 } from "./domain.js";
@@ -298,7 +299,7 @@ function generatedOutputs(drafts = draftsForCurrentPhotos()) {
     journal: buildJournalDraft({ date: state.date, drafts: usable }),
     bulletin: buildRoadBulletin({
       date: state.date,
-      weather: state.weather,
+      weather: state.weather === inferWeather(state.photos) ? summarizePatrolWeather(state.photos) || state.weather : state.weather,
       routeKeys,
       confirmedCondition: state.confirmedCondition
     })

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildDraft,
   buildJournalDraft,
@@ -12,6 +13,7 @@ import {
   placeAssignment,
   resolvePhotoAssignments,
   routeReadiness,
+  summarizePatrolWeather,
   timeFromOcr,
   timeFromOcrEvidence
 } from "../src/domain.js";
@@ -780,9 +782,9 @@ test("keeps the October 6 three-route patrol as one continuous outing", () => {
   const s101Draft = buildDraft({ date: "2026-10-06", routeKey: "s101", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "09:09", endTime: "10:07", photos: routePhotos("s101"), endsAtBrigade: false });
   const g6Draft = buildDraft({ date: "2026-10-06", routeKey: "g6", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "10:18", endTime: "10:48", photos: routePhotos("g6"), startsFromBrigade: false, endsAtBrigade: false });
   const westDraft = buildDraft({ date: "2026-10-06", routeKey: "west", vehicle: "青A8A971", officers: ["马玲瑞"], startTime: "11:02", endTime: "11:33", photos: routePhotos("west"), startsFromBrigade: false });
-  assert.match(s101Draft.narrative, /转入后续巡查线路/);
-  assert.match(g6Draft.narrative, /承接前一段巡查/);
-  assert.match(g6Draft.narrative, /转入后续巡查线路/);
+  assert.match(s101Draft.narrative, /沿巡查路线继续开展巡查/);
+  assert.doesNotMatch(g6Draft.narrative, /承接|同仁路口/);
+  assert.match(g6Draft.narrative, /沿巡查路线继续开展巡查/);
   assert.match(westDraft.narrative, /11时33分.*返回大队/);
 });
 
@@ -850,6 +852,66 @@ test("repairs common OCR coordinate punctuation variants within Qinghai bounds",
     coordinatesFromOcr("经纬度：36.6653112N,101/743038°E"),
     { latitude: 36.6653112, longitude: 101.743038 }
   );
+});
+
+test("recognizes every October 9 point and preserves the G6-S101-G6-west itinerary", () => {
+  const rows = JSON.parse(readFileSync(new URL("../data/october-09-ppocrv6-ocr.json", import.meta.url), "utf8"));
+  const photos = resolvePhotoAssignments(rows.map((row) => classifyImage(row)));
+  const expected = [
+    ["15:13", "g6", "朝阳立交"],
+    ["15:21", "s101", "韵家口匝道入口"],
+    ["15:24", "s101", "互助主线收费站"],
+    ["15:30", "s101", "塘川匝道"],
+    ["15:31", "s101", "塘川收费站"],
+    ["15:42", "s101", "互助南收费站"],
+    ["15:47", "s101", "互助东收费站"],
+    ["16:08", "s101", "互助主线收费站"],
+    ["16:12", "s101", "韵家口匝道出口"],
+    ["16:19", "g6", "海东主线收费站"],
+    ["16:29", "g6", "平安收费站"],
+    ["16:39", "g6", "海东主线收费站"],
+    ["16:57", "west", "西过境匝道入口"],
+    ["16:59", "west", "大酉山隧道"],
+    ["17:18", "west", "西宁西收费站"],
+    ["17:44", "west", "大酉山隧道"]
+  ];
+  assert.deepEqual(photos.filter((photo) => photo.include).map((photo) => [photo.time, photo.routeKey, photo.place]), expected);
+  assert.ok(photos.every((photo) => ["high", "topology"].includes(photo.confidence)));
+  for (const routeKey of ["g6", "s101", "west"]) {
+    const range = inferRouteTimeRange(routeKey, photos);
+    const draft = buildDraft({ date: "2026-10-09", routeKey, photos, ...range, startsFromBrigade: routeKey === "g6", endsAtBrigade: routeKey === "west" });
+    assert.doesNotMatch(draft.narrative, /承接|后续巡查线路|同仁路口/);
+    if (routeKey === "g6") {
+      assert.match(draft.narrative, /朝阳立交及连接路段/);
+      assert.match(draft.narrative, /15时13分随后转往S101/);
+      assert.match(draft.narrative, /16时19分由S101西宁高速转入G6/);
+      assert.match(draft.narrative, /随后转往G6京藏高速公路西过境段/);
+    }
+    if (routeKey === "s101") assert.match(draft.narrative, /随后转往G6京藏高速平西段/);
+  }
+  assert.equal(summarizePatrolWeather(photos), "晴、多云，西过境段部分路段阴");
+  const rerun = resolvePhotoAssignments(photos);
+  assert.deepEqual(rerun.map((photo) => [photo.time, photo.routeKey, photo.place, photo.include]), photos.map((photo) => [photo.time, photo.routeKey, photo.place, photo.include]));
+});
+
+test("requires same-day neighboring ramp evidence before resolving a partial Tangchuan toll name", () => {
+  const toll = { ...classifyImage({ fileName: "微信图片_20261009175344_385_70.jpg", ocrText: "15:31 2026-10-09 塘 ETC 站" }), sourceSeries: "test" };
+  const ramp = { ...classifyImage({ fileName: "微信图片_20261009175344_384_70.jpg", ocrText: "15:30 2026-10-08 塘川匝道" }), sourceSeries: "test" };
+  assert.notEqual(resolvePhotoAssignments([ramp, toll])[1].place, "塘川收费站");
+  const currentRamp = { ...classifyImage({ fileName: ramp.originalName, ocrText: "15:30 2026-10-09 塘川匝道" }), sourceSeries: "test" };
+  assert.equal(resolvePhotoAssignments([currentRamp, toll])[1].place, "塘川收费站");
+});
+
+test("retains the dated Minhe ramp closure without calling the closed ramp clear", () => {
+  const bulletin = (date) => buildRoadBulletin({ date, weather: "晴", routeKeys: ["g6", "s101", "west"], confirmedCondition: "畅通" });
+  for (const date of ["2026-09-06", "2026-10-09", "2026-12-07"]) {
+    assert.match(bulletin(date), /民和路匝道上下行线出入口.*封闭施工/);
+    assert.doesNotMatch(bulletin(date), /站东巷、民和路匝道无堵车/);
+  }
+  assert.doesNotMatch(bulletin("2026-09-05"), /封闭施工/);
+  assert.doesNotMatch(bulletin("2026-12-08"), /封闭施工/);
+  assert.match(bulletin("2026-10-09"), /塘川、互助南、互助东收费站/);
+  assert.match(bulletin("2026-10-09"), /^【交通综合执法/);
 });
 
 test("generates a road bulletin without unsupported full-route claims", () => {
